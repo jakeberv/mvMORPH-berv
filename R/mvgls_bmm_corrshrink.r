@@ -463,6 +463,7 @@
         df.free_model=2 * (length(regime_names) - 1)
     )
     results$df.free <- results$df.free_cov + results$df.free_beta + results$df.free_model
+    results$regime.summary <- .mvgls_corrshrink_regime_summary(results)
     class(results) <- "mvgls"
     results
 }

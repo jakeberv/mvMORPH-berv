@@ -117,6 +117,7 @@ easy_fit <- fit_corrshrink(Y ~ 1, data = list(Y = easy_Y), tree = easy_tree)
 easy_diag <- check_start_table(easy_fit, expected_nstarts = 12L)
 
 summary_out <- capture.output(summary(easy_fit))
+assert_true(any(grepl("Regime summary", summary_out, fixed = TRUE)), "summary output did not report the corr-shrink regime summary")
 assert_true(any(grepl("nstarts", summary_out, fixed = TRUE)), "summary output did not report corr-shrink start diagnostics")
 assert_true(any(grepl("selected", summary_out, fixed = TRUE)), "summary output did not report the selected start")
 

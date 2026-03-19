@@ -158,6 +158,21 @@ assert_true(inherits(summary_reg, "summary.mvgls"), "summary() did not return a 
 assert_true(all(c("AIC", "GIC", "logLik") %in% colnames(summary_reg$results.fit)),
   "summary output is missing the expected fit statistics"
 )
+assert_true(is.data.frame(fit_corr_reg$regime.summary), "corr-shrink fit did not store regime.summary")
+assert_true(is.data.frame(summary_reg$regime.summary), "summary() did not preserve regime.summary")
+assert_true(all(c("reference", "scale", "rho", "mean_rate", "mean_variance", "mean_covariance",
+                  "mean_correlation", "mean_abs_correlation") %in% colnames(summary_reg$regime.summary)),
+  "regime.summary is missing one or more expected columns"
+)
+assert_true(identical(rownames(summary_reg$regime.summary), names(fit_corr_reg$sigma$regime)),
+  "regime.summary row names do not match the fitted regimes"
+)
+for (nm in rownames(summary_reg$regime.summary)) {
+  assert_true(
+    abs(summary_reg$regime.summary[nm, "mean_rate"] - mean(diag(fit_corr_reg$sigma$regime[[nm]]))) < 1e-8,
+    sprintf("regime.summary mean_rate does not match the fitted regime covariance for '%s'", nm)
+  )
+}
 
 regime_mats_shrink <- fit_corr_shrink$sigma$regime
 assert_true(length(regime_mats_shrink) >= 2, "expected regime covariance matrices in the shrink fit")

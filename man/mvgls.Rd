@@ -53,7 +53,7 @@ For \code{model="BMM"}, the experimental option \code{bmm.structure="corrshrink"
 \details{
 \code{mvgls} allows fitting various multivariate linear models to multivariate (possibly high-dimensional, i.e. where the number of variables \emph{p} is larger than \emph{n}) datasets for which the residuals have a correlated structure (e.g. evolutionary models such as BM and OU). Models estimated using penalized likelihood (e.g., method="PL-LOOCV") are generally more accurate than those estimated by maximum likelihood methods (method="LL") when the number of traits approach the number of species. PL is the only solution when \emph{p}>\emph{n}.  Models fit can be compared using the GIC or EIC criterion (see ?\code{GIC} and ?\code{EIC}) and hypothesis testing can be performed using the \code{manova.gls} function.
 
-For the experimental BMM correlation-shrinkage mode, \code{GIC} and \code{EIC} are available and the fit can be used with \code{simulate()}. This branch returns a shared base covariance matrix together with per-regime covariance matrices, scale parameters, and correlation-retention parameters. A reference regime is fixed for identifiability and can be selected with \code{bmm.reference}; the default is the first mapped regime. The current experimental mode still does not support \code{predict()}, \code{ancestral()}, or normalized residuals.
+For the experimental BMM correlation-shrinkage mode, \code{GIC} and \code{EIC} are available and the fit can be used with \code{simulate()}. This branch returns a shared base covariance matrix together with per-regime covariance matrices, scale parameters, and correlation-retention parameters. A reference regime is fixed for identifiability and can be selected with \code{bmm.reference}; the default is the first mapped regime. To keep the output interpretable, corr-shrink fits also include a derived \code{regime.summary} table with per-regime average variance/rate and correlation summaries. The current experimental mode still does not support \code{predict()}, \code{ancestral()}, or normalized residuals.
 
 The tree is assumed to be fully dichotomic and in "postorder", otherwise the functions \code{multi2di} and \code{reorder.phylo} are used internally. Note that for the "BMM" model, a tree of class "simmap" must be provided to scale the BM variance-covariance matrix in different parts of the tree (see also \code{mvBM}).
 
@@ -101,6 +101,7 @@ An object of class '\code{mvgls}'. It contains a list including the following co
 \item{df.free_cov }{the number of covariance parameters used for information criteria when available}
 \item{df.free_beta}{the number of regression coefficients used for information criteria when available}
 \item{df.free_model}{the number of regime-specific BMM parameters used for information criteria when available}
+\item{regime.summary}{for experimental \code{bmm.structure="corrshrink"} fits, a derived per-regime summary table with the raw \code{scale} and \code{rho} parameters alongside average variance/rate, covariance, and correlation summaries computed from the fitted regime covariance matrices}
 \item{tuning		    }{the regularization/tuning parameter estimated for the penalized likelihood}
 \item{mserr		    	}{the estimated standard error when \code{error=TRUE}}
 \item{start_values  }{the starting parameters used for the optimization of the LL or PL}

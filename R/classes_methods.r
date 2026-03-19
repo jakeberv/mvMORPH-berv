@@ -110,6 +110,58 @@ EIC <- function(object, nboot=100L, nbcores=1L, ...) UseMethod("EIC")
     invisible(info)
 }
 
+.mvgls_corrshrink_regime_summary <- function(object){
+    if(!.mvgls_is_corrshrink(object)) return(NULL)
+    if(is.null(object$sigma) || is.null(object$sigma$regime)) return(NULL)
+
+    regime_names <- names(object$sigma$regime)
+    if(is.null(regime_names)) regime_names <- seq_along(object$sigma$regime)
+    p <- object$dims$p
+
+    rows <- lapply(regime_names, function(regime_name){
+        Sigma <- object$sigma$regime[[regime_name]]
+        if(is.null(Sigma)) return(NULL)
+        diag_vals <- diag(Sigma)
+        cov_vals <- Sigma[upper.tri(Sigma)]
+        cor_vals <- try({
+            corr <- stats::cov2cor(Sigma)
+            corr[upper.tri(corr)]
+        }, silent=TRUE)
+        if(inherits(cor_vals, "try-error")) cor_vals <- rep(NA_real_, length(cov_vals))
+
+        data.frame(
+            reference = identical(regime_name, object$reference_regime),
+            scale = unname(object$param[paste0(regime_name, ".scale")]),
+            rho = unname(object$param[paste0(regime_name, ".rho")]),
+            mean_rate = sum(diag_vals)/p,
+            mean_variance = mean(diag_vals),
+            mean_covariance = if(length(cov_vals)) mean(cov_vals) else 0,
+            mean_correlation = if(length(cor_vals)) mean(cor_vals) else 0,
+            mean_abs_correlation = if(length(cor_vals)) mean(abs(cor_vals)) else 0,
+            row.names = regime_name,
+            stringsAsFactors = FALSE
+        )
+    })
+
+    out <- do.call(rbind, rows)
+    rownames(out) <- regime_names
+    out
+}
+
+.mvgls_print_corrshrink_regime_summary <- function(object, digits = max(3L, getOption("digits") - 3L)){
+    info <- if(!is.null(object$regime.summary)) object$regime.summary else .mvgls_corrshrink_regime_summary(object)
+    if(is.null(info)) return(invisible(NULL))
+
+    display <- info
+    numeric_cols <- vapply(display, is.numeric, logical(1))
+    display[numeric_cols] <- lapply(display[numeric_cols], round, digits = digits)
+
+    cat("Regime summary:\n")
+    print(display)
+    cat("\n")
+    invisible(info)
+}
+
 # ------------------------------------------------------------------------- #
 # BIC.mvgls                                                                 #
 # options: object, ...                                                      #
@@ -861,6 +913,7 @@ print.mvgls <- function(x, digits = max(3L, getOption("digits") - 3L), ...){
     }
 
     if(.mvgls_is_corrshrink(x)){
+        .mvgls_print_corrshrink_regime_summary(x, digits = digits)
         .mvgls_print_corrshrink_diagnostics(x, digits = digits)
     }
     
@@ -921,6 +974,7 @@ print.summary.mvgls <- function(x, digits = max(3, getOption("digits") - 3), ...
     }
 
     if(.mvgls_is_corrshrink(x)){
+        .mvgls_print_corrshrink_regime_summary(x, digits = digits)
         .mvgls_print_corrshrink_diagnostics(x, digits = digits)
     }
     
@@ -972,6 +1026,7 @@ summary.mvgls <- function(object, ...){
         results.fit <- data.frame("AIC"=AIC, "GIC"=GIC, "logLik"=LL, row.names = " ")
         
         object$results.fit <- results.fit
+        object$regime.summary <- .mvgls_corrshrink_regime_summary(object)
         object$GLS <- if(inherits(object,"mvols")) FALSE else TRUE
         class(object) <- c("summary.mvgls","mvgls")
         return(object)
