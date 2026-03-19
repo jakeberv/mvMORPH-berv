@@ -22,7 +22,8 @@ mvgls.dfa <- function(object, ...){
   # options
   args <- list(...)
   if(is.null(args[["term"]])){
-    term <- object$dims$assign[which(attr(object$terms,"dataClasses")=="factor")[1]]
+    factor_terms <- which(attr(object$terms, "dataClasses")[-1] == "factor")
+    term <- factor_terms[1]
     if(is.na(term)) stop("there's no factor terms in the model")
   } else term <- args$term
   if(is.null(args[["type"]])) type <- "I" else type <- args$type
@@ -127,8 +128,10 @@ mvgls.dfa <- function(object, ...){
           },
           "II" = {
             
-            asgn <- asgn[asgn!=0]
-            intercept = TRUE # (TODO: handle cases where a model without intercept is fitted => type III)
+            term_cols <- .mvgls_term_columns(object)
+            nuisance_cols <- term_cols$nuisance
+            user_cols <- term_cols$user_cols
+            asgn <- term_cols$user_assign
             model_terms <- terms(object$formula)
             facTerms <- crossprod(attr(model_terms, "factors"))
             facTerms <- facTerms[,asgn,drop=FALSE]
@@ -138,10 +141,12 @@ mvgls.dfa <- function(object, ...){
             var_full[which(asgn==term)] <- TRUE
             
             # full model
-            Proj_full <- X[,c(intercept,var_full)] %*% pseudoinverse(X[,c(intercept,var_full), drop=FALSE])
+            full_cols <- c(nuisance_cols, user_cols[var_full])
+            Proj_full <- X[,full_cols, drop=FALSE] %*% pseudoinverse(X[,full_cols, drop=FALSE])
             
             # reduced model
-            Proj_reduc <- X[,c(intercept,var_reduc)] %*% pseudoinverse(X[,c(intercept,var_reduc), drop=FALSE])
+            reduc_cols <- c(nuisance_cols, user_cols[var_reduc])
+            Proj_reduc <- X[,reduc_cols, drop=FALSE] %*% pseudoinverse(X[,reduc_cols, drop=FALSE])
             
             # Hypothesis SSCP matrix
             H <- crossprod(Y, (Proj_full - Proj_reduc) %*% Y)
@@ -443,4 +448,3 @@ print.mvgls.dfa.predict <- function(x, ...){
     }
     cat("\n")
 }
-

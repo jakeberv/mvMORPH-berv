@@ -4,6 +4,14 @@
 #                                                                           #
 # ------------------------------------------------------------------------- #
 
+.mvgls_term_columns <- function(object){
+  asgn <- object$dims$assign
+  nuisance <- which(asgn <= 0)
+  user_cols <- which(asgn > 0)
+  user_assign <- asgn[user_cols]
+  list(asgn=asgn, nuisance=nuisance, user_cols=user_cols, user_assign=user_assign)
+}
+
 manova.gls <- function(object, test=c("Pillai", "Wilks", "Hotelling-Lawley", "Roy"), type=c("I","II","III"), nperm=1000L, L=NULL, ...){
   
   # options
@@ -446,13 +454,13 @@ manova.gls <- function(object, test=c("Pillai", "Wilks", "Hotelling-Lawley", "Ro
   #pivots <- Q_r$pivot[1L:Q_r$rank]
   asgn <- object$dims$assign
   if(type=="II"){
-    asgn <- asgn[asgn!=0]
-    intercept = TRUE # (TODO: handle cases where a model without intercept is fitted => type III)
+    term_cols <- .mvgls_term_columns(object)
+    nuisance_cols <- term_cols$nuisance
+    user_cols <- term_cols$user_cols
+    asgn <- term_cols$user_assign
     model_terms <- terms(object$formula)
     facTerms <- crossprod(attr(model_terms, "factors"))
     facTerms <- facTerms[,asgn,drop=FALSE]
-  }else{
-    intercept = NULL
   }
   nb.resid <- N - Q_r$rank
   nterms <- length(unique(asgn))
@@ -470,11 +478,17 @@ manova.gls <- function(object, test=c("Pillai", "Wilks", "Hotelling-Lawley", "Ro
                                 var_reduc <- var_full <- facTerms[k,]<unique(facTerms[k,which(asgn==k)])
                                 var_full[which(asgn==k)] <- TRUE
                                 # full model
-                                Proj_full <- X[,c(intercept,var_full)] %*% pseudoinverse(X[,c(intercept,var_full), drop=FALSE])
+                                full_cols <- c(nuisance_cols, user_cols[var_full])
+                                Proj_full <- X[,full_cols, drop=FALSE] %*% pseudoinverse(X[,full_cols, drop=FALSE])
                             }
                             
                           # reduced model
-                          Proj_reduc <- X[,c(intercept,var_reduc)] %*% pseudoinverse(X[,c(intercept,var_reduc), drop=FALSE])
+                          if(type=="III"){
+                              reduc_cols <- var_reduc
+                          }else{
+                              reduc_cols <- c(nuisance_cols, user_cols[var_reduc])
+                          }
+                          Proj_reduc <- X[,reduc_cols, drop=FALSE] %*% pseudoinverse(X[,reduc_cols, drop=FALSE])
                           # Hypothesis SSCP matrix
                           S <- crossprod(Y, (Proj_full - Proj_reduc) %*% Y)
                           # Compute the test statistic.
@@ -545,13 +559,13 @@ manova.gls <- function(object, test=c("Pillai", "Wilks", "Hotelling-Lawley", "Ro
   #pivots <- Q_r$pivot[1L:Q_r$rank]
   asgn <- object$dims$assign
   if(type=="II"){
-    asgn <- asgn[asgn!=0]
-    intercept = TRUE # we removed the intercept (TODO: handle cases where a model without intercept is fitted => type III)
+    term_cols <- .mvgls_term_columns(object)
+    nuisance_cols <- term_cols$nuisance
+    user_cols <- term_cols$user_cols
+    asgn <- term_cols$user_assign
     model_terms <- terms(object$formula)
     facTerms <- crossprod(attr(model_terms, "factors"))
     facTerms <- facTerms[,asgn,drop=FALSE]
-  }else{
-    intercept = NULL
   }
   uasgn <- unique(asgn)
   nterms <- length(uasgn)
@@ -570,11 +584,17 @@ manova.gls <- function(object, test=c("Pillai", "Wilks", "Hotelling-Lawley", "Ro
                                 var_reduc <- var_full <- facTerms[k,]<unique(facTerms[k,which(asgn==k)])
                                 var_full[which(asgn==k)] <- TRUE
                                 # full model
-                                Proj_full <- X[,c(intercept,var_full)] %*% pseudoinverse(X[,c(intercept,var_full), drop=FALSE])
+                                full_cols <- c(nuisance_cols, user_cols[var_full])
+                                Proj_full <- X[,full_cols, drop=FALSE] %*% pseudoinverse(X[,full_cols, drop=FALSE])
                             }
                           
                           # reduced model
-                          Proj_reduc <- X[,c(intercept,var_reduc)] %*% pseudoinverse(X[,c(intercept,var_reduc), drop=FALSE])
+                          if(type=="III"){
+                              reduc_cols <- var_reduc
+                          }else{
+                              reduc_cols <- c(nuisance_cols, user_cols[var_reduc])
+                          }
+                          Proj_reduc <- X[,reduc_cols, drop=FALSE] %*% pseudoinverse(X[,reduc_cols, drop=FALSE])
                           # Hypothesis SSCP matrix
                           S <- crossprod(Y, (Proj_full - Proj_reduc) %*% Y)
                           # Compute the test statistic.
@@ -598,17 +618,27 @@ manova.gls <- function(object, test=c("Pillai", "Wilks", "Hotelling-Lawley", "Ro
                                 var_full[which(asgn==k)] <- TRUE
                                 
                                 # full model
-                                Proj_full <- X[,c(intercept,var_full)] %*% pseudoinverse(X[,c(intercept,var_full), drop=FALSE])
+                                full_cols <- c(nuisance_cols, user_cols[var_full])
+                                Proj_full <- X[,full_cols, drop=FALSE] %*% pseudoinverse(X[,full_cols, drop=FALSE])
                             }
                            
                            # reduced model
-                           Proj_reduc <- X[,c(intercept,var_reduc)] %*% pseudoinverse(X[,c(intercept,var_reduc), drop=FALSE])
+                           if(type=="III"){
+                               reduc_cols <- var_reduc
+                           }else{
+                               reduc_cols <- c(nuisance_cols, user_cols[var_reduc])
+                           }
+                           Proj_reduc <- X[,reduc_cols, drop=FALSE] %*% pseudoinverse(X[,reduc_cols, drop=FALSE])
                            
                            # compute the residuals under the reduced model
                            resnull <- (In - Proj_reduc)%*%Y
                            
                            # Fitted values under the reduced model (probably not useful)
-                           if(penalized=="full") MeanNull <- object$variables$X[,c(intercept,var_reduc)] %*% pseudoinverse(X[,c(intercept,var_reduc), drop=FALSE]) %*% Y else MeanNull <- Proj_reduc%*%Y
+                           if(penalized=="full"){
+                               MeanNull <- object$variables$X[,reduc_cols, drop=FALSE] %*% pseudoinverse(X[,reduc_cols, drop=FALSE]) %*% Y
+                           }else{
+                               MeanNull <- Proj_reduc%*%Y
+                           }
                            
                            # Permutations
                            Null <- .parallel_mapply(function(i){
@@ -683,7 +713,7 @@ manova.gls <- function(object, test=c("Pillai", "Wilks", "Hotelling-Lawley", "Ro
                                
                                # Hypothesis SSCP
                                # we have to recompute the projection matrices with new X matrix
-                               Proj_reduc <- estimModelNull$corrSt$X[,c(intercept,var_reduc)] %*% pseudoinverse(estimModelNull$corrSt$X[,c(intercept,var_reduc), drop=FALSE])
+                               Proj_reduc <- estimModelNull$corrSt$X[,reduc_cols, drop=FALSE] %*% pseudoinverse(estimModelNull$corrSt$X[,reduc_cols, drop=FALSE])
                                Hp <- crossprod(estimModelNull$corrSt$Y, (Proj_full - Proj_reduc) %*% estimModelNull$corrSt$Y)
                                
                                # Error SSCP matrix

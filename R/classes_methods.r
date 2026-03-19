@@ -1113,6 +1113,9 @@ EIC.mvgls <- function(object, nboot=100L, nbcores=1L, ...){
     
     DsqrtInv <- .pruning_general(object$corrSt$phy, trans=FALSE, inv=TRUE)$sqrtM
     modelPerm <- object$call
+    modelPerm$formula <- object$formula
+    modelPerm$tree <- quote(object$variables$tree)
+    if(!is.null(object$model.frame)) modelPerm$data <- quote(object$model.frame)
     modelPerm$grid.search <- quote(FALSE)
     modelPerm$start <- quote(object$opt$par)
     
@@ -1536,6 +1539,7 @@ print.mvgls <- function(x, digits = max(3L, getOption("digits") - 3L), ...){
     if(!any(is.na(x$param))){
         switch(x$model,
         "OU"={ cat("alpha:",round(x$param, digits=digits),"\n\n")},
+        "OUM"={ cat("alpha:",round(x$param, digits=digits),"\n\n")},
         "EB"={ cat("r:",round(x$param, digits=digits),"\n\n")},
         "lambda"={cat("lambda:",round(x$param, digits=digits),"\n\n")},
         "BMM"={print(round(x$param, digits=digits)); cat("\n")},
@@ -1597,6 +1601,7 @@ print.summary.mvgls <- function(x, digits = max(3, getOption("digits") - 3), ...
     if(!any(is.na(x$param))){
         switch(x$model,
         "OU"={ cat("alpha:",round(x$param, digits=digits),"\n\n")},
+        "OUM"={ cat("alpha:",round(x$param, digits=digits),"\n\n")},
         "EB"={ cat("r:",round(x$param, digits=digits),"\n\n")},
         "lambda"={cat("lambda:",round(x$param, digits=digits),"\n\n")},
         "BMM"={print(round(x$param, digits=digits)); cat("\n")},
@@ -2010,6 +2015,29 @@ plot.mvgls <- function(x, term, ..., fitted=FALSE, residuals=FALSE){
 # options: object, newdata, ...                                             #
 #                                                                           #
 # ------------------------------------------------------------------------- #
+.mvgls_oum_predictor_matrix <- function(object, X_formula=NULL, tree=object$variables$tree, rows=NULL, include_internal=FALSE){
+    root <- object$root %||% "stationary"
+    root_std <- if(identical(root, "stationary")) 1L else 0L
+    nterm <- if(include_internal) Ntip(tree) + Nnode(tree) else Ntip(tree)
+    W <- .mvgls_oum_weight_matrix(tree, object$param, root=root, std=root_std, nterm=nterm)
+
+    if(!is.null(rows)){
+        if(any(!rows %in% rownames(W))) stop("Could not match OUM regimes to the requested rows")
+        W <- W[rows, , drop=FALSE]
+    }else if(!is.null(X_formula) && nrow(X_formula) != nrow(W)){
+        stop("OUM prediction requires row names matching the tree tips or nodes")
+    }
+
+    assign_formula <- object$dims$formula.assign %||% integer(0)
+    if(is.null(X_formula) || length(assign_formula) == 0L) return(W)
+
+    cov_idx <- which(assign_formula != 0)
+    if(length(cov_idx) == 0L) return(W)
+    if(nrow(X_formula) != nrow(W)) stop("The OUM covariate design does not match the regime design")
+
+    cbind(W, X_formula[, cov_idx, drop=FALSE])
+}
+
 predict.mvgls <- function(object, newdata, ...){
     
     args <- list(...)
@@ -2035,6 +2063,17 @@ predict.mvgls <- function(object, newdata, ...){
         
         # FIXME allow lists
         predictors_names <- rownames(newdata)
+        if(object$model=="OUM"){
+            tree_use <- if(is.null(tree)) object$variables$tree else tree
+            if(is.null(predictors_names)){
+                if(nrow(X) == Ntip(tree_use)){
+                    predictors_names <- tree_use$tip.label
+                }else{
+                    stop("OUM prediction requires row names on \"newdata\" matching tree tips")
+                }
+            }
+            X <- .mvgls_oum_predictor_matrix(object, X_formula=X, tree=tree_use, rows=predictors_names)
+        }
     }
     
     
@@ -2072,6 +2111,10 @@ predict.mvgls <- function(object, newdata, ...){
     switch(object$model,
     "BM"={ V <- vcv.phylo(tree)},
     "OU"={
+        V <- .Call("mvmorph_covar_ou_fixed", A=vcv.phylo(tree), alpha=as.double(object$param), sigma=1, PACKAGE="mvMORPH")
+        rownames(V) <- colnames(V) <- tree$tip.label
+    },
+    "OUM"={
         V <- .Call("mvmorph_covar_ou_fixed", A=vcv.phylo(tree), alpha=as.double(object$param), sigma=1, PACKAGE="mvMORPH")
         rownames(V) <- colnames(V) <- tree$tip.label
     },
@@ -2184,6 +2227,13 @@ ancestral.mvgls <- function(object, ...){
             # check the arguments
             if(!is.null(cl <- attr(Terms, "dataClasses"))) .checkMFClasses(cl, m)
             X <- model.matrix(Terms, m, contrasts.arg = object$contrasts)
+            if(object$model=="OUM"){
+                if(nrow(X) != Nnode(object$variables$tree)){
+                    stop("OUM ancestral reconstruction requires one row of predictors per internal node")
+                }
+                node_rows <- paste("node_", Ntip(object$variables$tree) + seq_len(Nnode(object$variables$tree)), sep="")
+                X <- .mvgls_oum_predictor_matrix(object, X_formula=X, tree=object$variables$tree, rows=node_rows, include_internal=TRUE)
+            }
             predicted_fit <- X %*% object$coefficients
             if(.mvgls_is_corrstrength(object) && nrow(predicted_fit) != Nnode(object$variables$tree)){
                 stop("corr-strength ancestral state estimation requires one row of predictors per internal node")
@@ -2199,6 +2249,9 @@ ancestral.mvgls <- function(object, ...){
                     byrow=TRUE
                 )
                 colnames(predicted_fit) <- colnames(object$variables$Y)
+            }else if(object$model=="OUM"){
+                node_rows <- paste("node_", Ntip(object$variables$tree) + seq_len(Nnode(object$variables$tree)), sep="")
+                predicted_fit <- .mvgls_oum_predictor_matrix(object, tree=object$variables$tree, rows=node_rows, include_internal=TRUE) %*% object$coefficients
             }else{
                 predicted_fit <- object$variables$X %*% object$coefficients
                 predicted_fit <- predicted_fit[-1,,drop=TRUE]

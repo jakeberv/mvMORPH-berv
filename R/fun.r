@@ -835,15 +835,64 @@ build.chol<-function(b,p){
 
 
 # Generate a weight matrix for OUM
-.make.x <- function(phy, param, X, model, root, std=0){
+.mvgls_oum_weight_matrix <- function(phy, param, root, std=0, nterm=NULL){
+    if(!inherits(phy,"simmap")) stop("A tree of class \"simmap\" is required for the OUM model")
+    if(is.null(nterm)) nterm <- Ntip(phy)
+    nterm <- as.integer(nterm)
+    n <- Ntip(phy)
+    k <- ncol(phy$mapped.edge)
+    if(root==TRUE) k <- k + 1L
+    precalc <- prepWOU(phy, n=as.integer(nterm), p=1, k=k, model="OUM", root=root)
+    W <- .Call(
+        mvmorph_weights,
+        nterm=nterm,
+        epochs=precalc$epochs,
+        lambda=param,
+        S=1,
+        S1=1,
+        beta=precalc$listReg,
+        root=as.integer(precalc$mod_stand)
+    )
+    if(root==TRUE){
+        colnames(W) <- c("root", colnames(phy$mapped.edge))
+    }else{
+        colnames(W) <- colnames(phy$mapped.edge)
+    }
+    if(nterm == n){
+        rownames(W) <- phy$tip.label
+    }else if(nterm == (n + Nnode(phy))){
+        rownames(W) <- c(phy$tip.label, paste("node_", n + seq_len(Nnode(phy)), sep=""))
+    }
+    W
+}
+
+.mvgls_oum_design <- function(phy, param, X=NULL, assign=NULL, root, std=0, nterm=NULL){
+    W <- .mvgls_oum_weight_matrix(phy, param, root=root, std=std, nterm=nterm)
+    assign_regime <- rep.int(0L, ncol(W))
+
+    if(is.null(X) || is.null(assign)){
+        return(list(X=W, regimes=W, covariates=NULL, assign=assign_regime))
+    }
+
+    X <- as.matrix(X)
+    if(nrow(X) != nrow(W)) stop("The OUM design matrix and regime weights have incompatible dimensions")
+    cov_idx <- which(assign != 0)
+    if(length(cov_idx) == 0L){
+        return(list(X=W, regimes=W, covariates=NULL, assign=assign_regime))
+    }
+
+    X_cov <- X[, cov_idx, drop=FALSE]
+    X_aug <- cbind(W, X_cov)
+    assign_aug <- c(assign_regime, as.integer(assign[cov_idx]))
+
+    list(X=X_aug, regimes=W, covariates=X_cov, assign=assign_aug)
+}
+
+.make.x <- function(phy, param, X, model, root, std=0, assign=NULL, nterm=NULL){
     
     switch(model,
     "OUM"={
-        if(!inherits(phy,"simmap")) stop("A tree of class \"simmap\" is required for the OUM model")
-        n <- Ntip(phy)
-        precalc <- mv.Precalc(phy, nb.traits=1, param=list(model="OUM", root=root))
-        X <- .Call(mvmorph_weights, nterm=as.integer(n), epochs=precalc$epochs, lambda=param, S=1, S1=1, beta=precalc$listReg, root=as.integer(std))
-        if(root==TRUE) colnames(X) <- c("root", colnames(phy$mapped.edge)) else colnames(X) <- colnames(phy$mapped.edge)
+        X <- .mvgls_oum_design(phy, param, X=X, assign=assign, root=root, std=std, nterm=nterm)$X
     },
     "OU1"={
         n <- Ntip(phy)

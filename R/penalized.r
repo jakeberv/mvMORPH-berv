@@ -239,7 +239,8 @@
     if(timeObject$model%in%c("EB", "BM", "lambda", "OU", "OUvcv", "BMM", "OUM", "OU1", "OUMvcv")){
         # Tree transformation
         struct = .transformTree(timeObject$structure, par, model=timeObject$model, mserr=timeObject$mserr,
-                                Y=timeObject$Y, X=timeObject$X, REML=timeObject$REML, precalc=timeObject$precalc)
+                                Y=timeObject$Y, X=timeObject$X, REML=timeObject$REML, precalc=timeObject$precalc,
+                                assign=timeObject$assign)
     }else{
         stop("Currently works for phylogenetic models \"BM\", \"EB\", \"OU\", \"BMM\", \"OUM\" \"OUMvcv\" and \"lambda\"  only...")
     }
@@ -409,7 +410,7 @@
 #      precalc=NULL                                                         #
 # ------------------------------------------------------------------------- #
 
-.transformTree <- function(phy, param, model=c("EB", "BM", "lambda", "OU", "BMM", "OUM","OUMvcv"), mserr=NULL, Y=NULL, X=NULL, REML=TRUE, precalc=NULL){
+.transformTree <- function(phy, param, model=c("EB", "BM", "lambda", "OU", "BMM", "OUM","OUMvcv"), mserr=NULL, Y=NULL, X=NULL, REML=TRUE, precalc=NULL, assign=NULL){
     
     # pre-compute and checks | TODO reduce computational burden by avoiding reordering and recomputing distances, ages...etc
     n <- Ntip(phy)
@@ -460,7 +461,9 @@
     },
     "OUM"={
         # Weight matrix OUM
-        W <- .Call(mvmorph_weights, nterm=as.integer(n), epochs=precalc$epochs, lambda=param, S=1, S1=1, beta=precalc$listReg, root=as.integer(precalc$root_std))
+        design_oum <- .mvgls_oum_design(phy, param, X=X, assign=assign, root=precalc$root, std=precalc$root_std)
+        W <- design_oum$regimes
+        Xraw <- design_oum$X
         
         # transform the tree
         D = numeric(n)
@@ -500,10 +503,11 @@
         # transform the variables
         w <- 1/diagWeight
         Y <- matrix(w*Y, nrow=n)
-        X <- matrix(w*W, nrow=n) # Here X is replaced by the weighted matrix
+        X <- matrix(w*Xraw, nrow=n)
+        dimnames(X) <- dimnames(Xraw)
         
         # REML "constant"
-        if(REML) const <- determinant(crossprod(W))$modulus # TODO: check for n-ultrametric trees
+        if(REML) const <- determinant(crossprod(Xraw))$modulus # TODO: check for n-ultrametric trees
         
         # Adjust errors
         if(!is.null(mserr)) mserr = mserr*exp(-2*param*D[descendent[extern]])

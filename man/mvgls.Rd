@@ -31,7 +31,7 @@ Phylogenetic tree (an object of class "\code{phylo}") or a time-series object (n
 }
 
 \item{model}{
-The evolutionary model: "BM" is Brownian Motion, "OU" is Ornstein-Uhlenbeck, "EB" is Early Burst, "lambda" is Pagel's lambda transformation, and "BMM" is a multi-rates Brownian motion (needs a tree of class "simmap").
+The evolutionary model: "BM" is Brownian Motion, "OU" is Ornstein-Uhlenbeck, "OUM" is an OU model with multiple mapped regimes (needs a tree of class "simmap"), "EB" is Early Burst, "lambda" is Pagel's lambda transformation, and "BMM" is a multi-rates Brownian motion (needs a tree of class "simmap").
 
 }
 
@@ -55,7 +55,7 @@ For \code{model="BMM"}, the experimental option \code{bmm.structure="corrstrengt
 
 For the experimental BMM correlation-strength mode, \code{GIC}, \code{EIC}, \code{simulate()}, \code{predict()}, \code{ancestral()}, normalized residuals, \code{confint()}, and \code{corrstrength_diagnostics()} are available. This branch returns a shared base covariance matrix together with per-regime covariance matrices, scale parameters, and correlation-strength parameters. A reference regime is fixed for identifiability and can be selected with \code{bmm.reference}; the default is the first mapped regime, matching the published proportional-BMM convention. To keep the output interpretable, corr-strength fits also include a derived \code{regime.summary} table with per-regime average variance/rate and correlation summaries. The current experimental mode still does not support \code{vcov(type="coef")}.
 
-The tree is assumed to be fully dichotomic and in "postorder", otherwise the functions \code{multi2di} and \code{reorder.phylo} are used internally. Note that for the "BMM" model, a tree of class "simmap" must be provided to scale the BM variance-covariance matrix in different parts of the tree (see also \code{mvBM}).
+The tree is assumed to be fully dichotomic and in "postorder", otherwise the functions \code{multi2di} and \code{reorder.phylo} are used internally. Note that for the "BMM" and "OUM" models, a tree of class "simmap" must be provided to describe the mapped regimes on the tree (see also \code{mvBM} and \code{mvOU}). In the \code{"OUM"} case, the regime-specific optimum columns are included automatically and any additional predictors supplied in the model formula are kept as covariates in the GLS design.
 
 To fit an ordinary multivariate linear model (possibly regularized), one can uses the \code{mvols} function instead.
 

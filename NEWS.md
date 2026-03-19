@@ -1,4 +1,5 @@
 ## mvMORPH 1.2.1
+    + allow mvgls OUM fits to retain user-supplied covariates alongside regime optima
     + fix type for integer in C header file
 ## mvMORPH 1.2.0
     + update tolerance value for mvgls tuning parameter search

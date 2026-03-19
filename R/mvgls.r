@@ -56,7 +56,6 @@ mvgls <- function(formula, data=list(), tree, model, method=c("PL-LOOCV","LL"), 
     # retrieve data and formula as in lm
     model_fr = model.frame(formula=formula, data=data)
     X = model.matrix(attr(model_fr, "terms"), data=model_fr, contrasts.arg=contrasts.def)
-    X.formula = X
     Y = model.response(model_fr)
     assign <- attr(X, "assign")
     terms <- attr(model_fr, "terms")
@@ -99,6 +98,8 @@ mvgls <- function(formula, data=list(), tree, model, method=c("PL-LOOCV","LL"), 
     if(!fullrank) warning("The design matrix is not of full rank. The dimensionality has been reduced by ",ncol(X)-qrx$rank,". Check your results carefully. \n")
     if(!fullrank) assign <- assign[qrx$pivot[1L:qrx$rank]]
     X <- X[,qrx$pivot[1L:qrx$rank], drop=FALSE] # FIXME: be less strict and handle case specific issues?
+    X.formula <- X
+    assign.formula <- assign
     
     # dimensions
     n = nobs = nrow(Y)
@@ -110,10 +111,11 @@ mvgls <- function(formula, data=list(), tree, model, method=c("PL-LOOCV","LL"), 
     precalc = .prepModel(tree, model, root)
     precalc$randomRoot = randomRoot
     precalc$root_std = root_std
+    precalc$root = root
 
     if(inherits(tree, "simmap")){
         if(model=="BMM") k <- ncol(tree$mapped.edge)
-        if(model=="OUM") m <- ncol(tree$mapped.edge)
+        if(model=="OUM") m <- ncol(tree$mapped.edge) + sum(assign.formula != 0)
         # TODO handle cases with covariate for OUM
     }else k <- NULL
     if(method=="LL") penalized=FALSE else penalized=TRUE
@@ -153,7 +155,7 @@ mvgls <- function(formula, data=list(), tree, model, method=c("PL-LOOCV","LL"), 
     if(scale.height) tree <- .scaleStruct(tree)
     corrModel <- list(Y=Y, X=X, REML=REML, mserr=mserr,
                     model=model, structure=tree, p=p, nobs=nobs, m=m,
-                    nloo=nloo, precalc=precalc)
+                    nloo=nloo, precalc=precalc, assign=assign.formula)
     
     # Set bounds for parameter search
     bounds <- corrModel$bounds <- .setBounds(penalty=penalty, model=model, lower=low, upper=up, tol=tol, mserr=mserr, penalized=penalized, corrModel=corrModel, k=k)
@@ -200,7 +202,17 @@ mvgls <- function(formula, data=list(), tree, model, method=c("PL-LOOCV","LL"), 
     }
     
     # Exceptions [to improve]
-    X <- .make.x(tree, mod_par, X, model, root, root_std)
+    regimes <- NULL
+    assign.fit <- assign.formula
+    X.predictors <- X
+    if(model=="OUM"){
+        oum_design <- .mvgls_oum_design(tree, mod_par, X=X, assign=assign.formula, root=root, std=root_std)
+        X <- oum_design$X
+        regimes <- oum_design$regimes
+        assign.fit <- oum_design$assign
+    }else{
+        X <- .make.x(tree, mod_par, X, model, root, root_std, assign=assign.formula)
+    }
     
     # List of results to return
     corrSt = .corrStr(mod_par, corrModel);
@@ -252,8 +264,17 @@ mvgls <- function(formula, data=list(), tree, model, method=c("PL-LOOCV","LL"), 
     }
     
     # number of dimensions
-    ndims <- list(n=n, p=p, m=m, assign=assign, rank=qrx$rank, pivot=qrx$pivot, fullrank=fullrank)
-    if(model=='OUM') variables <- list(Y=Y, X=X, tree=tree, regimes=X.formula) else variables <- list(Y=Y, X=X, tree=tree)
+    if(model=="OUM"){
+        rank.fit <- m
+        pivot.fit <- seq_len(ncol(X))
+        fullrank.fit <- (ncol(X) == rank.fit)
+    }else{
+        rank.fit <- qrx$rank
+        pivot.fit <- qrx$pivot
+        fullrank.fit <- fullrank
+    }
+    ndims <- list(n=n, p=p, m=m, assign=assign.fit, formula.assign=assign.formula, rank=rank.fit, pivot=pivot.fit, fullrank=fullrank.fit)
+    if(model=='OUM') variables <- list(Y=Y, X=X, tree=tree, regimes=regimes, predictors=X.predictors) else variables <- list(Y=Y, X=X, tree=tree)
     # End
     if(echo==TRUE) message("Done in ", numIter," iterations.")
     
@@ -261,6 +282,7 @@ mvgls <- function(formula, data=list(), tree, model, method=c("PL-LOOCV","LL"), 
     results = list(formula=formula,
         call = match.call(),
         coefficients=coefficients,
+        model.frame=model.frame,
         terms=terms,
         xlevels=xlevels,
         contrasts=contrasts,
@@ -281,6 +303,7 @@ mvgls <- function(formula, data=list(), tree, model, method=c("PL-LOOCV","LL"), 
         penalty=if(method=="LL") "LL" else penalty,
         target=if(method=="LL") "LL" else target,
         REML=REML,
+        root=root,
         FCI=if(isTRUE(FCI)) fci else NA,
         const_mtd = const_mtdist,
         opt=estimModel)
