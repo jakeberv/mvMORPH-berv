@@ -42,10 +42,10 @@ make_sigma <- function(sds, corr) {
   diag(sds) %*% corr %*% diag(sds)
 }
 
-apply_corrshrink <- function(base_sigma, scale, rho) {
+apply_corrstrength <- function(base_sigma, scale, kappa) {
   V <- diag(diag(base_sigma))
   W <- base_sigma - V
-  scale * (V + rho * W)
+  scale * (V + kappa * W)
 }
 
 make_simmap <- function(n_tips, state_counts, seed) {
@@ -103,16 +103,16 @@ make_scale_grid <- function(est, n = profile_points) {
   exp(seq(log(lo), log(hi), length.out = n))
 }
 
-make_rho_grid <- function(est, n = profile_points) {
-  center <- min(max(as.numeric(est), 0.02), 0.98)
+make_kappa_grid <- function(est, n = profile_points) {
+  center <- max(as.numeric(est), 0.02)
   lo <- max(0.01, center - 0.6)
-  hi <- min(0.99, center + 0.6)
+  hi <- max(center + 0.6, lo * 1.5)
   unique(round(seq(lo, hi, length.out = n), 6))
 }
 
 profile_interval <- function(fit, regime, parameter, level = 0.95) {
   est <- unname(fit$param[paste0(regime, ".", parameter)])
-  grid <- if (identical(parameter, "scale")) make_scale_grid(est) else make_rho_grid(est)
+  grid <- if (identical(parameter, "scale")) make_scale_grid(est) else make_kappa_grid(est)
   prof <- tryCatch(
     do.call(profile_helper, list(object = fit, parameter = parameter, regime = regime, grid = grid)),
     error = function(e) e
@@ -148,14 +148,14 @@ bootstrap_free_params <- function(fit, nboot) {
     if (inherits(refit, "error")) next
     for (regime in free_regimes) {
       scale_est <- unname(refit$param[paste0(regime, ".scale")])
-      rho_est <- unname(refit$param[paste0(regime, ".rho")])
+      kappa_est <- unname(refit$param[paste0(regime, ".kappa")])
       rows[[idx]] <- data.frame(
         draw = draw_id,
         anchor = fit$reference_regime,
         regime = regime,
         scale = scale_est,
-        rho = rho_est,
-        rho_boundary = as.numeric(is.finite(rho_est) && (rho_est < 0.05 || rho_est > 0.95)),
+        kappa = kappa_est,
+        kappa_boundary = as.numeric(is.finite(kappa_est) && (kappa_est < 0.05 || kappa_est > 1.95)),
         runaway_scale = as.numeric(is.finite(scale_est) && scale_est > 20),
         stringsAsFactors = FALSE
       )
@@ -169,8 +169,8 @@ bootstrap_free_params <- function(fit, nboot) {
       anchor = character(0),
       regime = character(0),
       scale = numeric(0),
-      rho = numeric(0),
-      rho_boundary = numeric(0),
+      kappa = numeric(0),
+      kappa_boundary = numeric(0),
       runaway_scale = numeric(0),
       stringsAsFactors = FALSE
     )
@@ -200,8 +200,8 @@ base_sigma <- make_sigma(
 )
 sigma_by_regime <- list(
   A = base_sigma,
-  B = apply_corrshrink(base_sigma, scale = 1.7, rho = 0.65),
-  C = apply_corrshrink(base_sigma, scale = 1.25, rho = 0.20)
+  B = apply_corrstrength(base_sigma, scale = 1.7, kappa = 1.25),
+  C = apply_corrstrength(base_sigma, scale = 1.25, kappa = 0.35)
 )
 
 tree <- make_simmap(n_tips = 24L, state_counts = c(A = 8L, B = 8L, C = 8L), seed = seed_base)
@@ -221,7 +221,7 @@ anchor_rows <- lapply(fits, function(fit) {
     GIC = GIC(fit)$GIC,
     selected_start = diag$selected_start_id %||% NA_integer_,
     max_scale = diag$max_scale %||% NA_real_,
-    boundary_rho = diag$boundary_rho %||% NA,
+    boundary_kappa = diag$boundary_kappa %||% NA,
     pathological_scale = diag$pathological_scale %||% NA,
     stringsAsFactors = FALSE
   )
@@ -245,9 +245,9 @@ for (anchor in names(fits)) {
   }
   for (regime in free_regimes) {
     scale_profile <- profile_interval(fit, regime = regime, parameter = "scale")
-    rho_profile <- profile_interval(fit, regime = regime, parameter = "rho")
+    kappa_profile <- profile_interval(fit, regime = regime, parameter = "kappa")
     scale_boot <- bootstrap_summary(boot_df, regime = regime, parameter = "scale")
-    rho_boot <- bootstrap_summary(boot_df, regime = regime, parameter = "rho")
+    kappa_boot <- bootstrap_summary(boot_df, regime = regime, parameter = "kappa")
     boot_sub <- boot_df[boot_df$regime == regime, , drop = FALSE]
     param_rows[[length(param_rows) + 1L]] <- data.frame(
       anchor = anchor,
@@ -257,12 +257,12 @@ for (anchor in names(fits)) {
       scale_profile_high = scale_profile$high,
       scale_boot_low = scale_boot$low,
       scale_boot_high = scale_boot$high,
-      rho_est = unname(fit$param[paste0(regime, ".rho")]),
-      rho_profile_low = rho_profile$low,
-      rho_profile_high = rho_profile$high,
-      rho_boot_low = rho_boot$low,
-      rho_boot_high = rho_boot$high,
-      rho_boot_boundary_rate = if (nrow(boot_sub)) mean(boot_sub$rho_boundary) else NA_real_,
+      kappa_est = unname(fit$param[paste0(regime, ".kappa")]),
+      kappa_profile_low = kappa_profile$low,
+      kappa_profile_high = kappa_profile$high,
+      kappa_boot_low = kappa_boot$low,
+      kappa_boot_high = kappa_boot$high,
+      kappa_boot_boundary_rate = if (nrow(boot_sub)) mean(boot_sub$kappa_boundary) else NA_real_,
       scale_boot_runaway_rate = if (nrow(boot_sub)) mean(boot_sub$runaway_scale) else NA_real_,
       boot_success = scale_boot$n,
       stringsAsFactors = FALSE
@@ -296,10 +296,17 @@ pairwise_cov <- do.call(rbind, pairwise_rows)
 rownames(pairwise_cov) <- NULL
 
 fmt <- function(x, digits = 3) {
+  if (is.logical(x)) {
+    return(ifelse(is.na(x), "NA", ifelse(x, "TRUE", "FALSE")))
+  }
+  if (is.character(x)) {
+    return(ifelse(is.na(x), "NA", x))
+  }
+  x <- as.numeric(x)
   ifelse(is.na(x), "NA", formatC(x, digits = digits, format = "f"))
 }
 
-cat("Running corr-shrink anchor-sensitivity workflow\n")
+cat("Running corr-strength anchor-sensitivity workflow\n")
 cat("Bootstrap replicates per anchor:", nboot, "\n")
 cat("Profile points per parameter:", profile_points, "\n\n")
 
@@ -308,6 +315,7 @@ anchor_print$logLik <- fmt(anchor_print$logLik, 3)
 anchor_print$AIC <- fmt(anchor_print$AIC, 3)
 anchor_print$GIC <- fmt(anchor_print$GIC, 3)
 anchor_print$max_scale <- fmt(anchor_print$max_scale, 2)
+if ("boundary_kappa" %in% names(anchor_print)) anchor_print$boundary_kappa <- fmt(anchor_print$boundary_kappa, 2)
 cat("Anchor-level fit summary\n")
 print(anchor_print, row.names = FALSE)
 
@@ -335,4 +343,15 @@ worst_pair <- pairwise_cov[which.max(pairwise_cov$frobenius_diff), , drop = FALS
 cat("\nLargest anchor-to-anchor covariance deviation\n")
 print(worst_pair, row.names = FALSE)
 
-cat("\ncorr-shrink anchor-sensitivity workflow completed\n")
+loglik_spread <- diff(range(anchor_summary$logLik))
+accept_loglik <- is.finite(loglik_spread) && loglik_spread < 5
+accept_pathology <- !any(as.logical(anchor_summary$pathological_scale), na.rm = TRUE)
+
+cat("\nAcceptance checks\n")
+cat("logLik spread < 5:", accept_loglik, "(spread =", fmt(loglik_spread, 3), ")\n")
+cat("no pathological scale flags:", accept_pathology, "\n")
+if (!(accept_loglik && accept_pathology)) {
+  warning("corr-strength anchor-sensitivity acceptance checks were not met for this seeded scenario")
+}
+
+cat("\ncorr-strength anchor-sensitivity workflow completed\n")

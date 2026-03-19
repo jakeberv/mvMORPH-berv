@@ -122,6 +122,21 @@
     list(reference_index=reference_index, reference_regime=regime_names[reference_index])
 }
 
+.mvgls_bmm_corrshrink_kappa_max <- function(R_base){
+    corr_base <- cov2cor(R_base)
+    lambda_min <- min(eigen(corr_base, symmetric=TRUE, only.values=TRUE)$values)
+    if(lambda_min < 1 - 1e-8){
+        max(1/(1 - lambda_min) - 1e-6, .Machine$double.eps)
+    }else{
+        3
+    }
+}
+
+.mvgls_bmm_corrshrink_eta_from_kappa <- function(kappa, kappa_max){
+    scaled <- pmin(pmax(kappa / kappa_max, .Machine$double.eps), 1 - .Machine$double.eps)
+    stats::qlogis(scaled)
+}
+
 .mvgls_bmm_corrshrink_start <- function(tree, Y, X, reference_index=1L){
     p <- ncol(Y)
     regime_names <- colnames(tree$mapped.edge)
@@ -150,46 +165,52 @@
     }
     ref_scale <- max(scale_guess[reference_index], .Machine$double.eps)
     rel_scales <- pmax(scale_guess[-reference_index]/ref_scale, .Machine$double.eps)
-    c(sigma_start, sqrt(rel_scales), rep(stats::qlogis(0.95), k-1))
+    R_start <- symPar(sigma_start, decomp="cholesky", p=p)
+    kappa_max_start <- .mvgls_bmm_corrshrink_kappa_max(R_start)
+    kappa_start <- rep(1, k - 1)
+    c(sigma_start, sqrt(rel_scales), .mvgls_bmm_corrshrink_eta_from_kappa(kappa_start, kappa_max_start))
 }
 
 .mvgls_bmm_corrshrink_parameter_blocks <- function(p, regime_names, reference_index=1L){
     sigma_len <- p * (p + 1) / 2
     k <- length(regime_names)
     scale_idx <- if(k > 1) sigma_len + seq_len(k - 1) else integer(0)
-    rho_idx <- if(k > 1) sigma_len + (k - 1) + seq_len(k - 1) else integer(0)
+    kappa_idx <- if(k > 1) sigma_len + (k - 1) + seq_len(k - 1) else integer(0)
     free_regime_names <- if(k > 1) regime_names[-reference_index] else character(0)
-    list(sigma_len=sigma_len, scale_idx=scale_idx, rho_idx=rho_idx, free_regime_names=free_regime_names)
+    list(sigma_len=sigma_len, scale_idx=scale_idx, kappa_idx=kappa_idx, free_regime_names=free_regime_names)
 }
 
 .mvgls_bmm_corrshrink_start_pool <- function(base_start, p, regime_names, reference_index=1L){
     blocks <- .mvgls_bmm_corrshrink_parameter_blocks(p, regime_names, reference_index=reference_index)
+    sigma_start <- base_start[seq_len(blocks$sigma_len)]
+    R_start <- symPar(sigma_start, decomp="cholesky", p=p)
+    kappa_max_start <- .mvgls_bmm_corrshrink_kappa_max(R_start)
+    kappa_seeds <- c(0.25, 0.75, 1.0, min(1.5, 0.9 * kappa_max_start))
     if(length(blocks$scale_idx) == 0L){
         start_table <- data.frame(
             start_id=1L,
             source="heuristic",
             scale_multiplier=NA_real_,
-            rho_seed=NA_real_,
+            kappa_seed=NA_real_,
             stringsAsFactors=FALSE
         )
         return(list(starts=list(base_start), start_table=start_table))
     }
     scale_multipliers <- c(0.5, 1, 2)
-    rho_seeds <- c(0.2, 0.5, 0.8, 0.95)
-    starts <- vector("list", length(scale_multipliers) * length(rho_seeds))
+    starts <- vector("list", length(scale_multipliers) * length(kappa_seeds))
     start_table <- data.frame(
         start_id=seq_along(starts),
         source="multistart",
-        scale_multiplier=rep(scale_multipliers, each=length(rho_seeds)),
-        rho_seed=rep(rho_seeds, times=length(scale_multipliers)),
+        scale_multiplier=rep(scale_multipliers, each=length(kappa_seeds)),
+        kappa_seed=rep(kappa_seeds, times=length(scale_multipliers)),
         stringsAsFactors=FALSE
     )
     counter <- 1L
     for(scale_multiplier in scale_multipliers){
-        for(rho_seed in rho_seeds){
+        for(kappa_seed in kappa_seeds){
             start_vec <- base_start
             start_vec[blocks$scale_idx] <- start_vec[blocks$scale_idx] * sqrt(scale_multiplier)
-            start_vec[blocks$rho_idx] <- stats::qlogis(rho_seed)
+            start_vec[blocks$kappa_idx] <- .mvgls_bmm_corrshrink_eta_from_kappa(kappa_seed, kappa_max_start)
             starts[[counter]] <- start_vec
             counter <- counter + 1L
         }
@@ -203,16 +224,18 @@
     k <- length(regime_names)
     theta_sigma <- par[seq_len(sigma_len)]
     theta_scale <- if(k > 1) par[blocks$scale_idx] else numeric(0)
-    theta_rho <- if(k > 1) par[blocks$rho_idx] else numeric(0)
+    theta_kappa <- if(k > 1) par[blocks$kappa_idx] else numeric(0)
+    R_base <- symPar(theta_sigma, decomp="cholesky", p=p)
+    kappa_max <- .mvgls_bmm_corrshrink_kappa_max(R_base)
     scale <- rep(1, k)
-    rho <- rep(1, k)
+    kappa <- rep(1, k)
     if(k > 1){
         scale[-reference_index] <- theta_scale^2
-        rho[-reference_index] <- stats::plogis(theta_rho)
+        kappa[-reference_index] <- kappa_max * stats::plogis(theta_kappa)
     }
     names(scale) <- regime_names
-    names(rho) <- regime_names
-    list(theta_sigma=theta_sigma, scale=scale, rho=rho)
+    names(kappa) <- regime_names
+    list(theta_sigma=theta_sigma, scale=scale, kappa=kappa, kappa_max=kappa_max, R_base=R_base)
 }
 
 .mvgls_bmm_corrshrink_fit_components <- function(par, X, Y, regime_cov, reference_index=1L){
@@ -221,14 +244,14 @@
     trait_names <- colnames(Y)
     regime_names <- names(regime_cov)
     unpacked <- .mvgls_bmm_corrshrink_unpack(par, p, regime_names, reference_index=reference_index)
-    R_base <- symPar(unpacked$theta_sigma, decomp="cholesky", p=p)
+    R_base <- unpacked$R_base
     V <- diag(diag(R_base))
     W <- R_base - V
     dimnames(R_base) <- list(trait_names, trait_names)
     dimnames(V) <- list(trait_names, trait_names)
     dimnames(W) <- list(trait_names, trait_names)
     C_var <- Reduce(`+`, Map(`*`, as.list(unpacked$scale), regime_cov))
-    C_cov <- Reduce(`+`, Map(`*`, as.list(unpacked$scale * unpacked$rho), regime_cov))
+    C_cov <- Reduce(`+`, Map(`*`, as.list(unpacked$scale * unpacked$kappa), regime_cov))
     Omega <- .Call(kroneckerSum,
         R=list(V, W),
         C=list(C_var, C_cov),
@@ -253,9 +276,9 @@
     coefficients <- matrix(beta_vec, nrow=ncol(X), ncol=p, dimnames=list(colnames(X), colnames(Y)))
     fitted_values <- X %*% coefficients
     residuals_raw <- Y - fitted_values
-    regime_vcv <- Map(function(scale, rho){
-        scale * (V + rho * W)
-    }, as.list(unpacked$scale), as.list(unpacked$rho))
+    regime_vcv <- Map(function(scale, kappa){
+        scale * (V + kappa * W)
+    }, as.list(unpacked$scale), as.list(unpacked$kappa))
     regime_vcv <- setNames(regime_vcv, regime_names)
     list(
         nloglik=nloglik,
@@ -272,7 +295,9 @@
         C_var=C_var,
         C_cov=C_cov,
         scale=unpacked$scale,
-        rho=unpacked$rho,
+        kappa=unpacked$kappa,
+        rho=unpacked$kappa,
+        kappa_max=unpacked$kappa_max,
         regime_vcv=regime_vcv,
         regime_cov=regime_cov
     )
@@ -317,9 +342,10 @@
     tie_idx[which.min(tie_norm)]
 }
 
-.mvgls_corrshrink_profile1d <- function(object, regime, param=c("rho", "scale"), grid, optimization=NULL, parameter=NULL){
+.mvgls_corrshrink_profile1d <- function(object, regime, param=c("kappa", "scale"), grid, optimization=NULL, parameter=NULL){
     if(!is.null(parameter)) param <- parameter
-    param <- match.arg(param)
+    if(identical(param, "rho")) param <- "kappa"
+    param <- match.arg(param, c("kappa", "scale"))
     if(!isTRUE(!is.null(object$bmm.structure) && identical(object$bmm.structure, "corrshrink"))){
         stop("The profiling helper is only available for corr-shrink mvgls fits")
     }
@@ -332,14 +358,9 @@
     p <- object$dims$p
     blocks <- .mvgls_bmm_corrshrink_parameter_blocks(p, regime_names, reference_index=reference_index)
     free_regime_idx <- match(regime, blocks$free_regime_names)
-    target_idx <- if(param == "scale") blocks$scale_idx[free_regime_idx] else blocks$rho_idx[free_regime_idx]
-    fixed_transform <- if(param == "scale"){
-        if(any(grid <= 0)) stop("Scale profile values must be strictly positive")
-        sqrt(grid)
-    }else{
-        if(any(grid <= 0 | grid >= 1)) stop("Rho profile values must lie strictly between 0 and 1")
-        stats::qlogis(grid)
-    }
+    target_idx <- if(param == "scale") blocks$scale_idx[free_regime_idx] else blocks$kappa_idx[free_regime_idx]
+    if(param == "scale" && any(grid <= 0)) stop("Scale profile values must be strictly positive")
+    if(param == "kappa" && any(grid <= 0)) stop("Kappa profile values must be strictly positive")
     objective_full <- function(par){
         fit <- .mvgls_bmm_corrshrink_fit_components(
             par,
@@ -364,17 +385,46 @@
     current_par <- object$opt$par
     free_idx <- setdiff(seq_along(current_par), target_idx)
     for(i in seq_along(grid)){
-        current_par[target_idx] <- fixed_transform[i]
         opt <- optim(
             par=current_par[free_idx],
             fn=function(free_par){
                 par_full <- current_par
                 par_full[free_idx] <- free_par
+                if(param == "scale"){
+                    par_full[target_idx] <- sqrt(grid[i])
+                }else{
+                    theta_sigma <- par_full[seq_len(blocks$sigma_len)]
+                    R_base <- symPar(theta_sigma, decomp="cholesky", p=p)
+                    kappa_max_i <- .mvgls_bmm_corrshrink_kappa_max(R_base)
+                    if(grid[i] >= kappa_max_i) return(1e25)
+                    par_full[target_idx] <- .mvgls_bmm_corrshrink_eta_from_kappa(grid[i], kappa_max_i)
+                }
                 objective_full(par_full)
             },
             method=optimization
         )
         current_par[free_idx] <- opt$par
+        if(param == "scale"){
+            current_par[target_idx] <- sqrt(grid[i])
+        }else{
+            theta_sigma <- current_par[seq_len(blocks$sigma_len)]
+            R_base <- symPar(theta_sigma, decomp="cholesky", p=p)
+            kappa_max_i <- .mvgls_bmm_corrshrink_kappa_max(R_base)
+            if(grid[i] >= kappa_max_i){
+                profile_rows[[i]] <- data.frame(
+                    regime=regime,
+                    param=param,
+                    fixed_value=grid[i],
+                    logLik=-Inf,
+                    convergence=opt$convergence,
+                    max_scale=Inf,
+                    stringsAsFactors=FALSE
+                )
+                current_par <- object$opt$par
+                next
+            }
+            current_par[target_idx] <- .mvgls_bmm_corrshrink_eta_from_kappa(grid[i], kappa_max_i)
+        }
         fit <- .mvgls_bmm_corrshrink_fit_components(
             current_par,
             X=object$variables$X,
@@ -398,7 +448,7 @@
     do.call(rbind, profile_rows)
 }
 
-.mvgls_corrshrink_profile <- function(object, parameter=c("rho", "scale"), regime, grid, optimization=NULL){
+.mvgls_corrshrink_profile <- function(object, parameter=c("kappa", "scale"), regime, grid, optimization=NULL){
     .mvgls_corrshrink_profile1d(
         object=object,
         regime=regime,
@@ -408,7 +458,7 @@
     )
 }
 
-.mvgls_bmm_corrshrink_profile <- function(object, parameter=c("rho", "scale"), regime, grid, optimization=NULL){
+.mvgls_bmm_corrshrink_profile <- function(object, parameter=c("kappa", "scale"), regime, grid, optimization=NULL){
     .mvgls_corrshrink_profile(
         object=object,
         parameter=parameter,
@@ -420,8 +470,9 @@
 
 .mvgls_bmm_corrshrink_object <- function(fit, formula, call_obj, model_frame, terms, xlevels, contrasts, variables, dims, start_values, method, optimization, tree, diagnostics, reference_regime){
     regime_names <- names(fit$scale)
-    param <- as.vector(rbind(fit$scale, fit$rho))
-    names(param) <- as.vector(rbind(paste0(regime_names, ".scale"), paste0(regime_names, ".rho")))
+    param <- as.vector(rbind(fit$scale, fit$kappa))
+    names(param) <- as.vector(rbind(paste0(regime_names, ".scale"), paste0(regime_names, ".kappa")))
+    param <- c(param, setNames(unname(fit$kappa), paste0(regime_names, ".rho")))
     results <- list(
         formula=formula,
         call=call_obj,
@@ -498,7 +549,7 @@
                 start_id=1L,
                 source="user-provided",
                 scale_multiplier=NA_real_,
-                rho_seed=NA_real_,
+                kappa_seed=NA_real_,
                 stringsAsFactors=FALSE
             )
         )
@@ -538,15 +589,17 @@
     start_table$nloglik <- vapply(candidates, function(x) x$nloglik, numeric(1))
     start_table$max_scale <- vapply(candidates, function(x) x$max_scale, numeric(1))
     start_table$selected <- start_table$start_id == selected_idx
-    non_ref_rho <- fit$rho[-reference_index]
+    non_ref_kappa <- fit$kappa[-reference_index]
     diagnostics <- list(
         nstarts=nrow(start_table),
         selected_start_id=selected_idx,
         reference_regime=reference$reference_regime,
         start_table=start_table,
-        boundary_rho=if(length(non_ref_rho) == 0L) FALSE else any(non_ref_rho < 0.02 | non_ref_rho > 0.98),
+        boundary_kappa=if(length(non_ref_kappa) == 0L) FALSE else any(non_ref_kappa < 0.02 | non_ref_kappa > 0.98 * fit$kappa_max),
+        boundary_rho=if(length(non_ref_kappa) == 0L) FALSE else any(non_ref_kappa < 0.02 | non_ref_kappa > 0.98 * fit$kappa_max),
         pathological_scale=any(fit$scale > 20),
-        max_scale=max(fit$scale)
+        max_scale=max(fit$scale),
+        kappa_max=fit$kappa_max
     )
     dims <- list(
         n=nrow(Y),

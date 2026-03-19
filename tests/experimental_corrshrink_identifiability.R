@@ -29,10 +29,10 @@ make_sigma <- function(sds, corr) {
   diag(sds) %*% corr %*% diag(sds)
 }
 
-apply_corrshrink <- function(base_sigma, scale, rho) {
+apply_corrstrength <- function(base_sigma, scale, kappa) {
   V <- diag(diag(base_sigma))
   W <- base_sigma - V
-  scale * (V + rho * W)
+  scale * (V + kappa * W)
 }
 
 start_helper <- getFromNamespace(".mvgls_bmm_corrshrink_start", "mvMORPH")
@@ -106,7 +106,7 @@ run_replicate <- function(scenario, rep_id) {
   derived_regime <- scenario$derived_regime %||% names(scenario$state_counts)[2]
   sigma_by_regime <- list(
     A = scenario$base_sigma,
-    B = apply_corrshrink(scenario$base_sigma, scenario$true_scale, scenario$true_rho)
+    B = apply_corrstrength(scenario$base_sigma, scenario$true_scale, scenario$true_kappa)
   )
 
   x <- NULL
@@ -133,10 +133,10 @@ run_replicate <- function(scenario, rep_id) {
     fit <- entry$fit
     success <- !inherits(fit, "error")
     est_scale <- NA_real_
-    est_rho <- NA_real_
+    est_kappa <- NA_real_
     if (success) {
       est_scale <- unname(fit$param[paste0(derived_regime, ".scale")])
-      est_rho <- unname(fit$param[paste0(derived_regime, ".rho")])
+      est_kappa <- unname(fit$param[paste0(derived_regime, ".kappa")])
     }
     data.frame(
       scenario = scenario$name,
@@ -148,15 +148,15 @@ run_replicate <- function(scenario, rep_id) {
       p = nrow(scenario$base_sigma),
       with_covariate = isTRUE(scenario$with_covariate),
       true_scale = scenario$true_scale,
-      true_rho = scenario$true_rho,
+      true_kappa = scenario$true_kappa,
       est_scale = est_scale,
-      est_rho = est_rho,
+      est_kappa = est_kappa,
       scale_error = est_scale - scenario$true_scale,
-      rho_error = est_rho - scenario$true_rho,
+      kappa_error = est_kappa - scenario$true_kappa,
       abs_scale_error = abs(est_scale - scenario$true_scale),
-      abs_rho_error = abs(est_rho - scenario$true_rho),
+      abs_kappa_error = abs(est_kappa - scenario$true_kappa),
       runaway_scale = as.numeric(is.finite(est_scale) && est_scale > 20),
-      rho_boundary = as.numeric(is.finite(est_rho) && (est_rho < 0.05 || est_rho > 0.95)),
+      kappa_boundary = as.numeric(is.finite(est_kappa) && (est_kappa < 0.05 || est_kappa > 1.95)),
       mapped_fraction = mapped_fraction,
       stringsAsFactors = FALSE
     )
@@ -175,19 +175,19 @@ summarise_mode <- function(df) {
     p = df$p[1],
     covariate = df$with_covariate[1],
     true_scale = df$true_scale[1],
-    true_rho = df$true_rho[1],
+    true_kappa = df$true_kappa[1],
     mapped_fraction_mean = mean(df$mapped_fraction),
     success_rate = mean(df$success_corrshrink),
     est_scale_mean = mean(success_df$est_scale),
     est_scale_median = stats::median(success_df$est_scale),
     est_scale_sd = stats::sd(success_df$est_scale),
-    est_rho_mean = mean(success_df$est_rho),
-    est_rho_median = stats::median(success_df$est_rho),
-    est_rho_sd = stats::sd(success_df$est_rho),
+    est_kappa_mean = mean(success_df$est_kappa),
+    est_kappa_median = stats::median(success_df$est_kappa),
+    est_kappa_sd = stats::sd(success_df$est_kappa),
     scale_rmse = sqrt(mean(success_df$scale_error^2)),
-    rho_rmse = sqrt(mean(success_df$rho_error^2)),
-    rho_mae = mean(success_df$abs_rho_error),
-    rho_boundary_rate = mean(success_df$rho_boundary),
+    kappa_rmse = sqrt(mean(success_df$kappa_error^2)),
+    kappa_mae = mean(success_df$abs_kappa_error),
+    kappa_boundary_rate = mean(success_df$kappa_boundary),
     runaway_scale_rate = mean(success_df$runaway_scale),
     stringsAsFactors = FALSE
   )
@@ -195,6 +195,7 @@ summarise_mode <- function(df) {
 
 base_sigma_2 <- matrix(c(1.30, 0.55, 0.55, 1.00), 2, 2)
 base_sigma_2_weak <- matrix(c(1.30, 0.08, 0.08, 1.00), 2, 2)
+base_sigma_2_strong <- matrix(c(1.30, 0.80, 0.80, 1.00), 2, 2)
 base_sigma_4 <- make_sigma(
   sds = c(1.3, 1.1, 1.0, 0.9),
   corr = matrix(
@@ -210,67 +211,78 @@ base_sigma_4 <- make_sigma(
 
 scenarios <- list(
   list(
-    name = "balanced_rho025_p2",
-    description = "Balanced regimes, 2 traits, strong off-diagonal signal",
+    name = "balanced_kappa100_p2",
+    description = "Balanced regimes, 2 traits, proportional correlation-strength",
     n_tips = 18L,
     state_counts = c(A = 9L, B = 9L),
     base_sigma = base_sigma_2,
     true_scale = 1.8,
-    true_rho = 0.25,
+    true_kappa = 1.0,
     with_covariate = FALSE,
     seed_offset = seed_base + 0L
   ),
   list(
-    name = "balanced_rho095_p2",
-    description = "Balanced regimes, 2 traits, near-proportional boundary",
+    name = "balanced_kappa025_p2",
+    description = "Balanced regimes, 2 traits, weaker-than-reference correlation-strength",
     n_tips = 18L,
     state_counts = c(A = 9L, B = 9L),
     base_sigma = base_sigma_2,
     true_scale = 1.8,
-    true_rho = 0.95,
+    true_kappa = 0.25,
     with_covariate = FALSE,
     seed_offset = seed_base + 100L
   ),
   list(
-    name = "sparse_regime_rho025_p2",
-    description = "Sparse derived regime, 2 traits, strong off-diagonal signal",
+    name = "stronger_kappa140_p2",
+    description = "Balanced regimes, 2 traits, stronger-than-reference correlation-strength",
     n_tips = 18L,
-    state_counts = c(A = 15L, B = 3L),
-    base_sigma = base_sigma_2,
+    state_counts = c(A = 9L, B = 9L),
+    base_sigma = base_sigma_2_strong,
     true_scale = 1.8,
-    true_rho = 0.25,
+    true_kappa = 1.40,
     with_covariate = FALSE,
     seed_offset = seed_base + 200L
   ),
   list(
-    name = "weak_offdiag_rho025_p2",
+    name = "sparse_regime_kappa025_p2",
+    description = "Sparse derived regime, 2 traits, weaker-than-reference correlation-strength",
+    n_tips = 18L,
+    state_counts = c(A = 15L, B = 3L),
+    base_sigma = base_sigma_2,
+    true_scale = 1.8,
+    true_kappa = 0.25,
+    with_covariate = FALSE,
+    seed_offset = seed_base + 300L
+  ),
+  list(
+    name = "weak_offdiag_kappa025_p2",
     description = "Balanced regimes, 2 traits, weak base off-diagonal signal",
     n_tips = 18L,
     state_counts = c(A = 9L, B = 9L),
     base_sigma = base_sigma_2_weak,
     true_scale = 1.8,
-    true_rho = 0.25,
+    true_kappa = 0.25,
     with_covariate = FALSE,
-    seed_offset = seed_base + 300L
+    seed_offset = seed_base + 400L
   ),
   list(
-    name = "balanced_rho025_p4_cov",
+    name = "balanced_kappa100_p4_cov",
     description = "Balanced regimes, 4 traits, one predictor",
     n_tips = 20L,
     state_counts = c(A = 10L, B = 10L),
     base_sigma = base_sigma_4,
     true_scale = 1.6,
-    true_rho = 0.25,
+    true_kappa = 1.0,
     with_covariate = TRUE,
     beta = rbind(
       "(Intercept)" = c(0.4, -0.2, 0.1, 0.3),
       "x" = c(0.6, -0.3, 0.2, 0.4)
     ),
-    seed_offset = seed_base + 400L
+    seed_offset = seed_base + 500L
   )
 )
 
-cat("Running corr-shrink identifiability study with", reps, "replicates per scenario\n")
+cat("Running corr-strength identifiability study with", reps, "replicates per scenario\n")
 
 results <- do.call(
   rbind,
@@ -295,21 +307,21 @@ fmt <- function(x, digits = 3) {
 }
 
 print_table <- summary_table[, c(
-  "scenario", "mode", "success_rate", "true_rho", "est_rho_mean", "est_rho_median", "rho_rmse",
+  "scenario", "mode", "success_rate", "true_kappa", "est_kappa_mean", "est_kappa_median", "kappa_rmse",
   "true_scale", "est_scale_mean", "est_scale_median", "scale_rmse",
-  "mapped_fraction_mean", "rho_boundary_rate", "runaway_scale_rate"
+  "mapped_fraction_mean", "kappa_boundary_rate", "runaway_scale_rate"
 )]
 print_table$success_rate <- fmt(print_table$success_rate, 2)
-print_table$true_rho <- fmt(print_table$true_rho, 2)
-print_table$est_rho_mean <- fmt(print_table$est_rho_mean, 2)
-print_table$est_rho_median <- fmt(print_table$est_rho_median, 2)
-print_table$rho_rmse <- fmt(print_table$rho_rmse, 2)
+print_table$true_kappa <- fmt(print_table$true_kappa, 2)
+print_table$est_kappa_mean <- fmt(print_table$est_kappa_mean, 2)
+print_table$est_kappa_median <- fmt(print_table$est_kappa_median, 2)
+print_table$kappa_rmse <- fmt(print_table$kappa_rmse, 2)
 print_table$true_scale <- fmt(print_table$true_scale, 2)
 print_table$est_scale_mean <- fmt(print_table$est_scale_mean, 2)
 print_table$est_scale_median <- fmt(print_table$est_scale_median, 2)
 print_table$scale_rmse <- fmt(print_table$scale_rmse, 2)
 print_table$mapped_fraction_mean <- fmt(print_table$mapped_fraction_mean, 2)
-print_table$rho_boundary_rate <- fmt(print_table$rho_boundary_rate, 2)
+print_table$kappa_boundary_rate <- fmt(print_table$kappa_boundary_rate, 2)
 print_table$runaway_scale_rate <- fmt(print_table$runaway_scale_rate, 2)
 
 cat("\nScenario summary\n")
@@ -322,12 +334,12 @@ comparison_table <- do.call(
     multi <- df[df$mode == "multi-start", , drop = FALSE]
     data.frame(
       scenario = single$scenario[1],
-      rho_rmse_single = single$rho_rmse,
-      rho_rmse_multi = multi$rho_rmse,
+      kappa_rmse_single = single$kappa_rmse,
+      kappa_rmse_multi = multi$kappa_rmse,
       scale_rmse_single = single$scale_rmse,
       scale_rmse_multi = multi$scale_rmse,
-      rho_boundary_single = single$rho_boundary_rate,
-      rho_boundary_multi = multi$rho_boundary_rate,
+      kappa_boundary_single = single$kappa_boundary_rate,
+      kappa_boundary_multi = multi$kappa_boundary_rate,
       runaway_scale_single = single$runaway_scale_rate,
       runaway_scale_multi = multi$runaway_scale_rate,
       stringsAsFactors = FALSE
@@ -337,12 +349,12 @@ comparison_table <- do.call(
 
 cat("\nSingle-start vs multi-start comparison\n")
 cmp_print <- comparison_table
-cmp_print$rho_rmse_single <- fmt(cmp_print$rho_rmse_single, 2)
-cmp_print$rho_rmse_multi <- fmt(cmp_print$rho_rmse_multi, 2)
+cmp_print$kappa_rmse_single <- fmt(cmp_print$kappa_rmse_single, 2)
+cmp_print$kappa_rmse_multi <- fmt(cmp_print$kappa_rmse_multi, 2)
 cmp_print$scale_rmse_single <- fmt(cmp_print$scale_rmse_single, 2)
 cmp_print$scale_rmse_multi <- fmt(cmp_print$scale_rmse_multi, 2)
-cmp_print$rho_boundary_single <- fmt(cmp_print$rho_boundary_single, 2)
-cmp_print$rho_boundary_multi <- fmt(cmp_print$rho_boundary_multi, 2)
+cmp_print$kappa_boundary_single <- fmt(cmp_print$kappa_boundary_single, 2)
+cmp_print$kappa_boundary_multi <- fmt(cmp_print$kappa_boundary_multi, 2)
 cmp_print$runaway_scale_single <- fmt(cmp_print$runaway_scale_single, 2)
 cmp_print$runaway_scale_multi <- fmt(cmp_print$runaway_scale_multi, 2)
 print(cmp_print, row.names = FALSE)
@@ -352,9 +364,9 @@ improvement_table <- do.call(
   lapply(split(comparison_table, comparison_table$scenario), function(df) {
     data.frame(
       scenario = df$scenario[1],
-      delta_rho_rmse = df$rho_rmse_multi - df$rho_rmse_single,
+      delta_kappa_rmse = df$kappa_rmse_multi - df$kappa_rmse_single,
       delta_scale_rmse = df$scale_rmse_multi - df$scale_rmse_single,
-      delta_rho_boundary = df$rho_boundary_multi - df$rho_boundary_single,
+      delta_kappa_boundary = df$kappa_boundary_multi - df$kappa_boundary_single,
       delta_runaway_scale = df$runaway_scale_multi - df$runaway_scale_single,
       stringsAsFactors = FALSE
     )
@@ -363,16 +375,16 @@ improvement_table <- do.call(
 
 cat("\nMulti-start deltas (multi minus single)\n")
 imp_print <- improvement_table
-imp_print$delta_rho_rmse <- fmt(imp_print$delta_rho_rmse, 2)
+imp_print$delta_kappa_rmse <- fmt(imp_print$delta_kappa_rmse, 2)
 imp_print$delta_scale_rmse <- fmt(imp_print$delta_scale_rmse, 2)
-imp_print$delta_rho_boundary <- fmt(imp_print$delta_rho_boundary, 2)
+imp_print$delta_kappa_boundary <- fmt(imp_print$delta_kappa_boundary, 2)
 imp_print$delta_runaway_scale <- fmt(imp_print$delta_runaway_scale, 2)
 print(imp_print, row.names = FALSE)
 
 low_info <- summary_table[
-  summary_table$rho_rmse == max(summary_table$rho_rmse) |
+  summary_table$kappa_rmse == max(summary_table$kappa_rmse) |
     summary_table$runaway_scale_rate == max(summary_table$runaway_scale_rate),
-  c("scenario", "mode", "mapped_fraction_mean", "rho_rmse", "rho_boundary_rate", "runaway_scale_rate")
+  c("scenario", "mode", "mapped_fraction_mean", "kappa_rmse", "kappa_boundary_rate", "runaway_scale_rate")
 ]
 rownames(low_info) <- NULL
 
@@ -380,7 +392,7 @@ cat("\nPotential weak-identifiability flags\n")
 print(low_info, row.names = FALSE)
 
 if (!any(results$success_corrshrink)) {
-  stop("The identifiability study produced no successful corr-shrink fits.", call. = FALSE)
+  stop("The identifiability study produced no successful corr-strength fits.", call. = FALSE)
 }
 
-cat("\ncorr-shrink identifiability study completed\n")
+cat("\ncorr-strength identifiability study completed\n")
