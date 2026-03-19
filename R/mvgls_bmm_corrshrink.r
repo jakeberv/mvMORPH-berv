@@ -2,7 +2,7 @@
 ##                                                                            ##
 ##              mvMORPH: mvgls_bmm_corrshrink.r                               ##
 ##                                                                            ##
-##   Experimental corr-shrink BMM fit for mvgls                               ##
+##   Experimental corr-strength BMM fit for mvgls                             ##
 ##                                                                            ##
 ################################################################################
 
@@ -15,15 +15,13 @@
     edge_ratio[!is.finite(edge_ratio)] <- 1
     mapped_edge <- mapped_edge * edge_ratio
     regime_names <- colnames(mapped_edge)
-    regime_trees <- vector("list", length(regime_names))
     regime_cov <- vector("list", length(regime_names))
-    names(regime_trees) <- regime_names
     names(regime_cov) <- regime_names
     for(i in seq_along(regime_names)){
-        regime_trees[[i]] <- tree
-        regime_trees[[i]]$edge.length <- mapped_edge[, i]
-        regime_trees[[i]]$state <- regime_names[i]
-        regime_cov[[i]] <- vcv.phylo(regime_trees[[i]])[tree$tip.label, tree$tip.label, drop=FALSE]
+        regime_tree <- tree
+        regime_tree$edge.length <- mapped_edge[, i]
+        regime_tree$state <- regime_names[i]
+        regime_cov[[i]] <- vcv.phylo(regime_tree)[tree$tip.label, tree$tip.label, drop=FALSE]
     }
     regime_cov
 }
@@ -45,7 +43,7 @@
     }else{
         sigma_regime <- sigma_regime[regime_names]
         if(any(vapply(sigma_regime, is.null, logical(1)))){
-            stop("The corr-shrink sigma source is missing one or more regime covariance matrices")
+            stop("The corr-strength sigma source is missing one or more regime covariance matrices")
         }
     }
     .Call(kroneckerSum,
@@ -60,11 +58,11 @@
 .mvgls_corrshrink_loglik <- function(Y, object, coefficients=object$coefficients, sigma_object=object){
     Y <- as.matrix(Y)
     if(!identical(dim(Y), dim(object$variables$Y))){
-        stop("The response matrix does not match the fitted corr-shrink object dimensions")
+        stop("The response matrix does not match the fitted corr-strength object dimensions")
     }
     coefficients <- as.matrix(coefficients)
     if(!identical(dim(coefficients), dim(object$coefficients))){
-        stop("The coefficient matrix does not match the fitted corr-shrink object dimensions")
+        stop("The coefficient matrix does not match the fitted corr-strength object dimensions")
     }
     Omega <- .mvgls_corrshrink_omega(object, sigma_object=sigma_object)
     chol_omega <- try(chol(Omega), silent=TRUE)
@@ -78,7 +76,7 @@
 
 .mvgls_corrshrink_refit <- function(object, Y, start=object$opt$par, echo=FALSE){
     if(is.null(object$model.frame)){
-        stop("corr-shrink refits require the original model.frame on the fitted object")
+        stop("corr-strength refits require the original model.frame on the fitted object")
     }
     refit_args <- list(
         formula=object$formula,
@@ -88,7 +86,7 @@
         method="LL",
         REML=FALSE,
         response=as.matrix(Y),
-        bmm.structure="corrshrink",
+        bmm.structure="corrstrength",
         bmm.reference=object$reference_regime,
         grid.search=FALSE,
         start=start,
@@ -122,19 +120,71 @@
     list(reference_index=reference_index, reference_regime=regime_names[reference_index])
 }
 
-.mvgls_bmm_corrshrink_kappa_max <- function(R_base){
-    corr_base <- cov2cor(R_base)
-    lambda_min <- min(eigen(corr_base, symmetric=TRUE, only.values=TRUE)$values)
-    if(lambda_min < 1 - 1e-8){
-        max(1/(1 - lambda_min) - 1e-6, .Machine$double.eps)
+.mvgls_bmm_corrshrink_corr_strength_max <- function(pattern){
+    lambda_min <- min(eigen(pattern, symmetric=TRUE, only.values=TRUE)$values)
+    if(lambda_min < 0){
+        max(-1 / lambda_min - 1e-6, .Machine$double.eps)
     }else{
         3
     }
 }
 
-.mvgls_bmm_corrshrink_eta_from_kappa <- function(kappa, kappa_max){
-    scaled <- pmin(pmax(kappa / kappa_max, .Machine$double.eps), 1 - .Machine$double.eps)
+.mvgls_bmm_corrshrink_eta_from_corr_strength <- function(corr_strength, corr_strength_max){
+    scaled <- pmin(pmax(corr_strength / corr_strength_max, .Machine$double.eps), 1 - .Machine$double.eps)
     stats::qlogis(scaled)
+}
+
+.mvgls_bmm_corrshrink_safe_inverse <- function(x){
+    inv <- try(solve(x), silent=TRUE)
+    if(inherits(inv, "try-error")){
+        solve(x + diag(1e-8, nrow(x)))
+    }else{
+        inv
+    }
+}
+
+.mvgls_bmm_corrshrink_template <- function(theta_sigma, p, trait_names=NULL){
+    template_raw <- symPar(theta_sigma, decomp="cholesky", p=p)
+    diag_values <- diag(template_raw)
+    D <- diag(sqrt(diag_values))
+    V <- diag(diag_values)
+    raw_offdiag <- template_raw - V
+    pattern <- matrix(0, p, p)
+    pattern_scale <- 1
+    if(p > 1){
+        inv_d <- diag(1 / sqrt(diag_values))
+        pattern_raw <- inv_d %*% raw_offdiag %*% inv_d
+        diag(pattern_raw) <- 0
+        upper_values <- abs(pattern_raw[upper.tri(pattern_raw)])
+        pattern_scale <- mean(upper_values)
+        if(is.finite(pattern_scale) && pattern_scale > .Machine$double.eps){
+            pattern <- pattern_raw / pattern_scale
+            diag(pattern) <- 0
+        }else{
+            pattern_scale <- 1
+        }
+    }
+    Q <- D %*% pattern %*% D
+    template_unit <- V + Q
+    corr_strength_max <- .mvgls_bmm_corrshrink_corr_strength_max(pattern)
+    if(!is.null(trait_names)){
+        dimnames(template_raw) <- list(trait_names, trait_names)
+        dimnames(D) <- list(trait_names, trait_names)
+        dimnames(V) <- list(trait_names, trait_names)
+        dimnames(pattern) <- list(trait_names, trait_names)
+        dimnames(Q) <- list(trait_names, trait_names)
+        dimnames(template_unit) <- list(trait_names, trait_names)
+    }
+    list(
+        template_raw=template_raw,
+        D=D,
+        V=V,
+        pattern=pattern,
+        pattern_scale=pattern_scale,
+        Q=Q,
+        template_unit=template_unit,
+        corr_strength_max=corr_strength_max
+    )
 }
 
 .mvgls_bmm_corrshrink_start <- function(tree, Y, X, reference_index=1L){
@@ -164,53 +214,64 @@
         scale_guess <- pmax(scale_guess^2, .Machine$double.eps)
     }
     ref_scale <- max(scale_guess[reference_index], .Machine$double.eps)
-    rel_scales <- pmax(scale_guess[-reference_index]/ref_scale, .Machine$double.eps)
-    R_start <- symPar(sigma_start, decomp="cholesky", p=p)
-    kappa_max_start <- .mvgls_bmm_corrshrink_kappa_max(R_start)
-    kappa_start <- rep(1, k - 1)
-    c(sigma_start, sqrt(rel_scales), .mvgls_bmm_corrshrink_eta_from_kappa(kappa_start, kappa_max_start))
+    rel_scales <- pmax(scale_guess[-reference_index] / ref_scale, .Machine$double.eps)
+    template_start <- .mvgls_bmm_corrshrink_template(sigma_start, p=p)
+    corr_strength_start <- min(1, 0.9 * template_start$corr_strength_max)
+    c(
+        sigma_start,
+        sqrt(rel_scales),
+        rep(.mvgls_bmm_corrshrink_eta_from_corr_strength(corr_strength_start, template_start$corr_strength_max), k)
+    )
 }
 
 .mvgls_bmm_corrshrink_parameter_blocks <- function(p, regime_names, reference_index=1L){
     sigma_len <- p * (p + 1) / 2
     k <- length(regime_names)
     scale_idx <- if(k > 1) sigma_len + seq_len(k - 1) else integer(0)
-    kappa_idx <- if(k > 1) sigma_len + (k - 1) + seq_len(k - 1) else integer(0)
-    free_regime_names <- if(k > 1) regime_names[-reference_index] else character(0)
-    list(sigma_len=sigma_len, scale_idx=scale_idx, kappa_idx=kappa_idx, free_regime_names=free_regime_names)
+    corr_strength_idx <- sigma_len + length(scale_idx) + seq_len(k)
+    free_scale_regime_names <- if(k > 1) regime_names[-reference_index] else character(0)
+    list(
+        sigma_len=sigma_len,
+        scale_idx=scale_idx,
+        corr_strength_idx=corr_strength_idx,
+        free_scale_regime_names=free_scale_regime_names
+    )
 }
 
 .mvgls_bmm_corrshrink_start_pool <- function(base_start, p, regime_names, reference_index=1L){
     blocks <- .mvgls_bmm_corrshrink_parameter_blocks(p, regime_names, reference_index=reference_index)
     sigma_start <- base_start[seq_len(blocks$sigma_len)]
-    R_start <- symPar(sigma_start, decomp="cholesky", p=p)
-    kappa_max_start <- .mvgls_bmm_corrshrink_kappa_max(R_start)
-    kappa_seeds <- c(0.25, 0.75, 1.0, min(1.5, 0.9 * kappa_max_start))
+    template_start <- .mvgls_bmm_corrshrink_template(sigma_start, p=p)
+    corr_strength_max_start <- template_start$corr_strength_max
+    corr_strength_seeds <- c(0.25, 0.75, 1.0, min(1.5, 0.9 * corr_strength_max_start))
     if(length(blocks$scale_idx) == 0L){
         start_table <- data.frame(
             start_id=1L,
             source="heuristic",
             scale_multiplier=NA_real_,
-            kappa_seed=NA_real_,
+            corr_strength_seed=NA_real_,
             stringsAsFactors=FALSE
         )
         return(list(starts=list(base_start), start_table=start_table))
     }
     scale_multipliers <- c(0.5, 1, 2)
-    starts <- vector("list", length(scale_multipliers) * length(kappa_seeds))
+    starts <- vector("list", length(scale_multipliers) * length(corr_strength_seeds))
     start_table <- data.frame(
         start_id=seq_along(starts),
         source="multistart",
-        scale_multiplier=rep(scale_multipliers, each=length(kappa_seeds)),
-        kappa_seed=rep(kappa_seeds, times=length(scale_multipliers)),
+        scale_multiplier=rep(scale_multipliers, each=length(corr_strength_seeds)),
+        corr_strength_seed=rep(corr_strength_seeds, times=length(scale_multipliers)),
         stringsAsFactors=FALSE
     )
     counter <- 1L
     for(scale_multiplier in scale_multipliers){
-        for(kappa_seed in kappa_seeds){
+        for(corr_strength_seed in corr_strength_seeds){
             start_vec <- base_start
             start_vec[blocks$scale_idx] <- start_vec[blocks$scale_idx] * sqrt(scale_multiplier)
-            start_vec[blocks$kappa_idx] <- .mvgls_bmm_corrshrink_eta_from_kappa(kappa_seed, kappa_max_start)
+            start_vec[blocks$corr_strength_idx] <- rep(
+                .mvgls_bmm_corrshrink_eta_from_corr_strength(corr_strength_seed, corr_strength_max_start),
+                length(blocks$corr_strength_idx)
+            )
             starts[[counter]] <- start_vec
             counter <- counter + 1L
         }
@@ -220,22 +281,25 @@
 
 .mvgls_bmm_corrshrink_unpack <- function(par, p, regime_names, reference_index=1L){
     blocks <- .mvgls_bmm_corrshrink_parameter_blocks(p, regime_names, reference_index=reference_index)
-    sigma_len <- blocks$sigma_len
     k <- length(regime_names)
-    theta_sigma <- par[seq_len(sigma_len)]
-    theta_scale <- if(k > 1) par[blocks$scale_idx] else numeric(0)
-    theta_kappa <- if(k > 1) par[blocks$kappa_idx] else numeric(0)
-    R_base <- symPar(theta_sigma, decomp="cholesky", p=p)
-    kappa_max <- .mvgls_bmm_corrshrink_kappa_max(R_base)
+    theta_sigma <- par[seq_len(blocks$sigma_len)]
+    theta_scale <- if(length(blocks$scale_idx)) par[blocks$scale_idx] else numeric(0)
+    theta_corr_strength <- par[blocks$corr_strength_idx]
+    template <- .mvgls_bmm_corrshrink_template(theta_sigma, p=p)
     scale <- rep(1, k)
-    kappa <- rep(1, k)
-    if(k > 1){
+    corr_strength <- template$corr_strength_max * stats::plogis(theta_corr_strength)
+    if(length(blocks$scale_idx)){
         scale[-reference_index] <- theta_scale^2
-        kappa[-reference_index] <- kappa_max * stats::plogis(theta_kappa)
     }
     names(scale) <- regime_names
-    names(kappa) <- regime_names
-    list(theta_sigma=theta_sigma, scale=scale, kappa=kappa, kappa_max=kappa_max, R_base=R_base)
+    names(corr_strength) <- regime_names
+    list(
+        theta_sigma=theta_sigma,
+        scale=scale,
+        corr_strength=corr_strength,
+        corr_strength_max=template$corr_strength_max,
+        template=template
+    )
 }
 
 .mvgls_bmm_corrshrink_fit_components <- function(par, X, Y, regime_cov, reference_index=1L){
@@ -244,17 +308,18 @@
     trait_names <- colnames(Y)
     regime_names <- names(regime_cov)
     unpacked <- .mvgls_bmm_corrshrink_unpack(par, p, regime_names, reference_index=reference_index)
-    R_base <- unpacked$R_base
-    V <- diag(diag(R_base))
-    W <- R_base - V
-    dimnames(R_base) <- list(trait_names, trait_names)
+    template <- unpacked$template
+    V <- template$V
+    Q <- template$Q
+    dimnames(template$template_unit) <- list(trait_names, trait_names)
     dimnames(V) <- list(trait_names, trait_names)
-    dimnames(W) <- list(trait_names, trait_names)
+    dimnames(template$pattern) <- list(trait_names, trait_names)
+    dimnames(Q) <- list(trait_names, trait_names)
     C_var <- Reduce(`+`, Map(`*`, as.list(unpacked$scale), regime_cov))
-    C_cov <- Reduce(`+`, Map(`*`, as.list(unpacked$scale * unpacked$kappa), regime_cov))
+    C_corr <- Reduce(`+`, Map(`*`, as.list(unpacked$scale * unpacked$corr_strength), regime_cov))
     Omega <- .Call(kroneckerSum,
-        R=list(V, W),
-        C=list(C_var, C_cov),
+        R=list(V, Q),
+        C=list(C_var, C_corr),
         Rrows=as.integer(p),
         Crows=as.integer(n),
         dimlist=as.integer(2)
@@ -276,9 +341,9 @@
     coefficients <- matrix(beta_vec, nrow=ncol(X), ncol=p, dimnames=list(colnames(X), colnames(Y)))
     fitted_values <- X %*% coefficients
     residuals_raw <- Y - fitted_values
-    regime_vcv <- Map(function(scale, kappa){
-        scale * (V + kappa * W)
-    }, as.list(unpacked$scale), as.list(unpacked$kappa))
+    regime_vcv <- Map(function(scale, corr_strength){
+        scale * (V + corr_strength * Q)
+    }, as.list(unpacked$scale), as.list(unpacked$corr_strength))
     regime_vcv <- setNames(regime_vcv, regime_names)
     list(
         nloglik=nloglik,
@@ -289,15 +354,15 @@
         chol_omega=chol_omega,
         X_big=X_big,
         y_vec=y_vec,
-        R_base=R_base,
+        template_cov_unit=template$template_unit,
         V=V,
-        W=W,
+        Q=Q,
+        pattern=template$pattern,
         C_var=C_var,
-        C_cov=C_cov,
+        C_corr=C_corr,
         scale=unpacked$scale,
-        kappa=unpacked$kappa,
-        rho=unpacked$kappa,
-        kappa_max=unpacked$kappa_max,
+        corr_strength=unpacked$corr_strength,
+        corr_strength_max=unpacked$corr_strength_max,
         regime_vcv=regime_vcv,
         regime_cov=regime_cov
     )
@@ -322,11 +387,11 @@
 }
 
 .mvgls_bmm_corrshrink_select_candidate <- function(candidates, tol=1e-6){
-    if(length(candidates) == 0L) stop("No corr-shrink optimization candidates were provided")
+    if(length(candidates) == 0L) stop("No corr-strength optimization candidates were provided")
     good_idx <- which(vapply(candidates, function(x){
         is.finite(x$nloglik) && !is.null(x$fit)
     }, logical(1)))
-    if(length(good_idx) == 0L) stop("Optimization failed for all corr-shrink starting points")
+    if(length(good_idx) == 0L) stop("Optimization failed for all corr-strength starting points")
     converged_idx <- good_idx[vapply(candidates[good_idx], function(x){
         !is.null(x$opt) && identical(x$opt$convergence, 0L)
     }, logical(1))]
@@ -342,25 +407,27 @@
     tie_idx[which.min(tie_norm)]
 }
 
-.mvgls_corrshrink_profile1d <- function(object, regime, param=c("kappa", "scale"), grid, optimization=NULL, parameter=NULL){
+.mvgls_corrshrink_profile1d <- function(object, regime, param=c("corr_strength", "scale"), grid, optimization=NULL, parameter=NULL){
     if(!is.null(parameter)) param <- parameter
-    if(identical(param, "rho")) param <- "kappa"
-    param <- match.arg(param, c("kappa", "scale"))
-    if(!isTRUE(!is.null(object$bmm.structure) && identical(object$bmm.structure, "corrshrink"))){
-        stop("The profiling helper is only available for corr-shrink mvgls fits")
-    }
+    if(identical(param, "kappa") || identical(param, "rho")) param <- "corr_strength"
+    param <- match.arg(param, c("corr_strength", "scale"))
     regime_names <- names(object$sigma$regime)
     regime_index <- match(regime, regime_names)
-    if(is.na(regime_index)) stop("Unknown regime for corr-shrink profile")
+    if(is.na(regime_index)) stop("Unknown regime for corr-strength profile")
     reference_index <- match(object$reference_regime, regime_names)
-    if(is.na(reference_index)) stop("The corr-shrink fit is missing a valid reference_regime")
-    if(regime_index == reference_index) stop("The reference regime is fixed and cannot be profiled")
+    if(is.na(reference_index)) stop("The corr-strength fit is missing a valid reference_regime")
+    if(param == "scale" && regime_index == reference_index){
+        stop("The reference regime scale is fixed and cannot be profiled")
+    }
     p <- object$dims$p
     blocks <- .mvgls_bmm_corrshrink_parameter_blocks(p, regime_names, reference_index=reference_index)
-    free_regime_idx <- match(regime, blocks$free_regime_names)
-    target_idx <- if(param == "scale") blocks$scale_idx[free_regime_idx] else blocks$kappa_idx[free_regime_idx]
+    target_idx <- if(param == "scale"){
+        blocks$scale_idx[match(regime, blocks$free_scale_regime_names)]
+    }else{
+        blocks$corr_strength_idx[regime_index]
+    }
     if(param == "scale" && any(grid <= 0)) stop("Scale profile values must be strictly positive")
-    if(param == "kappa" && any(grid <= 0)) stop("Kappa profile values must be strictly positive")
+    if(param == "corr_strength" && any(grid <= 0)) stop("corr_strength profile values must be strictly positive")
     objective_full <- function(par){
         fit <- .mvgls_bmm_corrshrink_fit_components(
             par,
@@ -394,10 +461,9 @@
                     par_full[target_idx] <- sqrt(grid[i])
                 }else{
                     theta_sigma <- par_full[seq_len(blocks$sigma_len)]
-                    R_base <- symPar(theta_sigma, decomp="cholesky", p=p)
-                    kappa_max_i <- .mvgls_bmm_corrshrink_kappa_max(R_base)
-                    if(grid[i] >= kappa_max_i) return(1e25)
-                    par_full[target_idx] <- .mvgls_bmm_corrshrink_eta_from_kappa(grid[i], kappa_max_i)
+                    template <- .mvgls_bmm_corrshrink_template(theta_sigma, p=p)
+                    if(grid[i] >= template$corr_strength_max) return(1e25)
+                    par_full[target_idx] <- .mvgls_bmm_corrshrink_eta_from_corr_strength(grid[i], template$corr_strength_max)
                 }
                 objective_full(par_full)
             },
@@ -408,9 +474,8 @@
             current_par[target_idx] <- sqrt(grid[i])
         }else{
             theta_sigma <- current_par[seq_len(blocks$sigma_len)]
-            R_base <- symPar(theta_sigma, decomp="cholesky", p=p)
-            kappa_max_i <- .mvgls_bmm_corrshrink_kappa_max(R_base)
-            if(grid[i] >= kappa_max_i){
+            template <- .mvgls_bmm_corrshrink_template(theta_sigma, p=p)
+            if(grid[i] >= template$corr_strength_max){
                 profile_rows[[i]] <- data.frame(
                     regime=regime,
                     param=param,
@@ -423,7 +488,7 @@
                 current_par <- object$opt$par
                 next
             }
-            current_par[target_idx] <- .mvgls_bmm_corrshrink_eta_from_kappa(grid[i], kappa_max_i)
+            current_par[target_idx] <- .mvgls_bmm_corrshrink_eta_from_corr_strength(grid[i], template$corr_strength_max)
         }
         fit <- .mvgls_bmm_corrshrink_fit_components(
             current_par,
@@ -448,7 +513,7 @@
     do.call(rbind, profile_rows)
 }
 
-.mvgls_corrshrink_profile <- function(object, parameter=c("kappa", "scale"), regime, grid, optimization=NULL){
+.mvgls_corrshrink_profile <- function(object, parameter=c("corr_strength", "scale"), regime, grid, optimization=NULL){
     .mvgls_corrshrink_profile1d(
         object=object,
         regime=regime,
@@ -458,7 +523,7 @@
     )
 }
 
-.mvgls_bmm_corrshrink_profile <- function(object, parameter=c("kappa", "scale"), regime, grid, optimization=NULL){
+.mvgls_bmm_corrshrink_profile <- function(object, parameter=c("corr_strength", "scale"), regime, grid, optimization=NULL){
     .mvgls_corrshrink_profile(
         object=object,
         parameter=parameter,
@@ -470,9 +535,8 @@
 
 .mvgls_bmm_corrshrink_object <- function(fit, formula, call_obj, model_frame, terms, xlevels, contrasts, variables, dims, start_values, method, optimization, tree, diagnostics, reference_regime){
     regime_names <- names(fit$scale)
-    param <- as.vector(rbind(fit$scale, fit$kappa))
-    names(param) <- as.vector(rbind(paste0(regime_names, ".scale"), paste0(regime_names, ".kappa")))
-    param <- c(param, setNames(unname(fit$kappa), paste0(regime_names, ".rho")))
+    param <- as.vector(rbind(fit$scale, fit$corr_strength))
+    names(param) <- as.vector(rbind(paste0(regime_names, ".scale"), paste0(regime_names, ".corr_strength")))
     results <- list(
         formula=formula,
         call=call_obj,
@@ -491,30 +555,39 @@
         numIter=fit$opt$count[1],
         residuals=fit$residuals,
         sigma=list(
-            Pinv=fit$R_base,
-            P=solve(fit$R_base),
+            Pinv=fit$template_cov_unit,
+            P=.mvgls_bmm_corrshrink_safe_inverse(fit$template_cov_unit),
             S=NULL,
+            pattern=fit$pattern,
             regime=fit$regime_vcv
         ),
         tuning=NA,
         param=param,
         mserr=NA,
         start_values=start_values,
-        corrSt=list(type="corrshrink", phy=tree, X=variables$X, Y=variables$Y, regime_cov=fit$regime_cov, reference_regime=reference_regime),
+        corrSt=list(
+            type="corrstrength",
+            phy=tree,
+            X=variables$X,
+            Y=variables$Y,
+            regime_cov=fit$regime_cov,
+            reference_regime=reference_regime
+        ),
         penalty="LL",
         target="LL",
         REML=FALSE,
         FCI=NA,
         const_mtd=NA,
         opt=fit$opt,
-        diagnostics=list(corrshrink=diagnostics),
-        bmm.structure="corrshrink",
+        diagnostics=list(corrstrength=diagnostics),
+        bmm.structure="corrstrength",
         df.free_cov=dims$p * (dims$p + 1) / 2,
         df.free_beta=length(fit$coefficients),
-        df.free_model=2 * (length(regime_names) - 1)
+        df.free_model=(2 * length(regime_names)) - 1,
+        regime.summary=NULL
     )
     results$df.free <- results$df.free_cov + results$df.free_beta + results$df.free_model
-    results$regime.summary <- .mvgls_corrshrink_regime_summary(results)
+    results$regime.summary <- .mvgls_corrstrength_regime_summary(results)
     class(results) <- "mvgls"
     results
 }
@@ -522,13 +595,13 @@
 .fit_mvgls_bmm_corrshrink <- function(formula, call_obj, model_fr, X, Y, tree, terms, xlevels, contrasts, assign,
                                       qrx, method, REML, penalty, target, optimization, start,
                                       mserr, FCI, hessian, scale.height, bmm_reference=NULL){
-    if(method != "LL") stop("The experimental corr-shrink BMM is available only with method=\"LL\"")
-    if(isTRUE(REML)) stop("The experimental corr-shrink BMM does not support REML=TRUE")
-    if(!is.null(mserr)) stop("The experimental corr-shrink BMM does not support measurement error")
-    if(!identical(penalty, "RidgeArch")) stop("The experimental corr-shrink BMM does not support penalized settings")
-    if(penalty == "EmpBayes") stop("The experimental corr-shrink BMM does not support EmpBayes")
-    if(isTRUE(FCI)) stop("The experimental corr-shrink BMM does not support FCI")
-    if(!inherits(tree, "simmap")) stop("A tree of class \"simmap\" is required for bmm.structure=\"corrshrink\"")
+    if(method != "LL") stop("The experimental corr-strength BMM is available only with method=\"LL\"")
+    if(isTRUE(REML)) stop("The experimental corr-strength BMM does not support REML=TRUE")
+    if(!is.null(mserr)) stop("The experimental corr-strength BMM does not support measurement error")
+    if(!identical(penalty, "RidgeArch")) stop("The experimental corr-strength BMM does not support penalized settings")
+    if(penalty == "EmpBayes") stop("The experimental corr-strength BMM does not support EmpBayes")
+    if(isTRUE(FCI)) stop("The experimental corr-strength BMM does not support FCI")
+    if(!inherits(tree, "simmap")) stop("A tree of class \"simmap\" is required for bmm.structure=\"corrstrength\"")
     if(scale.height) tree <- .scaleStruct(tree)
     regime_cov <- .mvgls_bmm_corrshrink_regimes(tree)
     reference <- .mvgls_bmm_corrshrink_reference(names(regime_cov), bmm_reference=bmm_reference)
@@ -549,7 +622,7 @@
                 start_id=1L,
                 source="user-provided",
                 scale_multiplier=NA_real_,
-                kappa_seed=NA_real_,
+                corr_strength_seed=NA_real_,
                 stringsAsFactors=FALSE
             )
         )
@@ -580,26 +653,24 @@
         fit <- .mvgls_bmm_corrshrink_fit_components(opt$par, X=X, Y=Y, regime_cov=regime_cov, reference_index=reference_index)
     }
     if(!identical(opt$convergence, 0L)){
-        warning("The experimental corr-shrink BMM optimizer reported convergence code ", opt$convergence)
+        warning("The experimental corr-strength BMM optimizer reported convergence code ", opt$convergence)
     }
-    if(is.null(fit) || !is.finite(fit$nloglik)) stop("Optimization failed for the experimental corr-shrink BMM fit")
+    if(is.null(fit) || !is.finite(fit$nloglik)) stop("Optimization failed for the experimental corr-strength BMM fit")
     fit$opt <- opt
     start_table <- start_pool$start_table
     start_table$convergence <- vapply(candidates, function(x) if(is.null(x$opt)) NA_integer_ else x$opt$convergence, integer(1))
     start_table$nloglik <- vapply(candidates, function(x) x$nloglik, numeric(1))
     start_table$max_scale <- vapply(candidates, function(x) x$max_scale, numeric(1))
     start_table$selected <- start_table$start_id == selected_idx
-    non_ref_kappa <- fit$kappa[-reference_index]
     diagnostics <- list(
         nstarts=nrow(start_table),
         selected_start_id=selected_idx,
         reference_regime=reference$reference_regime,
         start_table=start_table,
-        boundary_kappa=if(length(non_ref_kappa) == 0L) FALSE else any(non_ref_kappa < 0.02 | non_ref_kappa > 0.98 * fit$kappa_max),
-        boundary_rho=if(length(non_ref_kappa) == 0L) FALSE else any(non_ref_kappa < 0.02 | non_ref_kappa > 0.98 * fit$kappa_max),
+        boundary_corr_strength=any(fit$corr_strength < 0.02 | fit$corr_strength > 0.98 * fit$corr_strength_max),
         pathological_scale=any(fit$scale > 20),
         max_scale=max(fit$scale),
-        kappa_max=fit$kappa_max
+        corr_strength_max=fit$corr_strength_max
     )
     dims <- list(
         n=nrow(Y),
@@ -629,3 +700,13 @@
         reference_regime=reference$reference_regime
     )
 }
+
+# Corrstrength aliases for downstream methods/tests on the experimental branch.
+.mvgls_corrstrength_regime_cov <- .mvgls_corrshrink_regime_cov
+.mvgls_corrstrength_omega <- .mvgls_corrshrink_omega
+.mvgls_corrstrength_loglik <- .mvgls_corrshrink_loglik
+.mvgls_corrstrength_refit <- .mvgls_corrshrink_refit
+.mvgls_corrstrength_profile1d <- .mvgls_corrshrink_profile1d
+.mvgls_corrstrength_profile <- .mvgls_corrshrink_profile
+.mvgls_bmm_corrstrength_start <- .mvgls_bmm_corrshrink_start
+.mvgls_bmm_corrstrength_profile <- .mvgls_bmm_corrshrink_profile

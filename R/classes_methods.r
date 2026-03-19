@@ -14,35 +14,27 @@
 # ------------ S3 Methods ------------------------------------------------- #
 GIC <- function(object, ...) UseMethod("GIC")
 EIC <- function(object, nboot=100L, nbcores=1L, ...) UseMethod("EIC")
-corrshrink_diagnostics <- function(object, ...) UseMethod("corrshrink_diagnostics")
+corrstrength_diagnostics <- function(object, ...) UseMethod("corrstrength_diagnostics")
 `%||%` <- function(x, y) if(is.null(x)) y else x
 
-.mvgls_is_corrshrink <- function(object){
-    isTRUE(!is.null(object$bmm.structure) && identical(object$bmm.structure, "corrshrink"))
+.mvgls_is_corrstrength <- function(object){
+    isTRUE(!is.null(object$bmm.structure) && identical(object$bmm.structure, "corrstrength"))
 }
 
-.mvgls_corrshrink_cor_param_name <- function(object, regime_name=NULL){
-    param_names <- names(object$param)
-    if(is.null(param_names)) return("kappa")
-    if(!is.null(regime_name)){
-        if(paste0(regime_name, ".kappa") %in% param_names) return("kappa")
-        if(paste0(regime_name, ".rho") %in% param_names) return("rho")
-    }
-    if(any(grepl("\\.kappa$", param_names))) return("kappa")
-    if(any(grepl("\\.rho$", param_names))) return("rho")
-    "kappa"
+.mvgls_corrstrength_cor_param_name <- function(object=NULL){
+    "corr_strength"
 }
 
-.mvgls_corrshrink_regime_param <- function(object, regime_name, param_name){
+.mvgls_corrstrength_regime_param <- function(object, regime_name, param_name){
     if(is.null(object$param)) return(NA_real_)
     key <- paste0(regime_name, ".", param_name)
     if(!key %in% names(object$param)) return(NA_real_)
     unname(object$param[[key]])
 }
 
-.mvgls_corrshrink_primary_param_names <- function(object, include_reference=TRUE){
+.mvgls_corrstrength_primary_param_names <- function(object, include_reference=TRUE){
     if(is.null(object$sigma) || is.null(object$sigma$regime)) return(character(0))
-    cor_param <- .mvgls_corrshrink_cor_param_name(object)
+    cor_param <- .mvgls_corrstrength_cor_param_name()
     regime_names <- names(object$sigma$regime)
     if(is.null(regime_names)) regime_names <- character(0)
     if(!include_reference && !is.null(object$reference_regime)){
@@ -51,19 +43,18 @@ corrshrink_diagnostics <- function(object, ...) UseMethod("corrshrink_diagnostic
     as.vector(rbind(paste0(regime_names, ".scale"), paste0(regime_names, ".", cor_param)))
 }
 
-.mvgls_corrshrink_parse_parm <- function(object, parm){
-    cor_param <- .mvgls_corrshrink_cor_param_name(object)
-    available <- .mvgls_corrshrink_primary_param_names(object, include_reference=TRUE)
+.mvgls_corrstrength_parse_parm <- function(object, parm){
+    cor_param <- .mvgls_corrstrength_cor_param_name()
+    available <- .mvgls_corrstrength_primary_param_names(object, include_reference=TRUE)
     if(is.null(parm)) return(available)
     parm <- as.character(parm)
-    parm <- sub("\\.rho$", paste0(".", cor_param), parm)
     if(any(!parm %in% available)){
-        stop("Unknown corr-shrink parameter requested in 'parm'")
+        stop("Unknown corr-strength parameter requested in 'parm'")
     }
     parm
 }
 
-.mvgls_corrshrink_regime_covariances <- function(object, tree=object$variables$tree, internal=FALSE){
+.mvgls_corrstrength_regime_covariances <- function(object, tree=object$variables$tree, internal=FALSE){
     regime_cov <- NULL
     same_tree <- inherits(tree, "phylo") &&
         inherits(object$variables$tree, "phylo") &&
@@ -83,13 +74,13 @@ corrshrink_diagnostics <- function(object, ...) UseMethod("corrshrink_diagnostic
     regime_names <- names(sigma_regime)
     regime_cov <- regime_cov[regime_names]
     if(any(vapply(regime_cov, is.null, logical(1)))){
-        stop("Missing one or more regime covariance matrices for the corr-shrink fit")
+        stop("Missing one or more regime covariance matrices for the corr-strength fit")
     }
     regime_cov
 }
 
-.mvgls_corrshrink_omega_from_tree <- function(object, tree=object$variables$tree, internal=FALSE){
-    regime_cov <- .mvgls_corrshrink_regime_covariances(object, tree=tree, internal=internal)
+.mvgls_corrstrength_omega_from_tree <- function(object, tree=object$variables$tree, internal=FALSE){
+    regime_cov <- .mvgls_corrstrength_regime_covariances(object, tree=tree, internal=internal)
     sigma_regime <- object$sigma$regime[names(regime_cov)]
     .Call(kroneckerSum,
         R=sigma_regime,
@@ -100,11 +91,11 @@ corrshrink_diagnostics <- function(object, ...) UseMethod("corrshrink_diagnostic
     )
 }
 
-.mvgls_corrshrink_block_index <- function(base_index, block_size, p){
+.mvgls_corrstrength_block_index <- function(base_index, block_size, p){
     as.integer(unlist(lapply(seq_len(p), function(i) base_index + (i - 1L) * block_size), use.names=FALSE))
 }
 
-.mvgls_corrshrink_conditional_weights <- function(cov_train, rhs){
+.mvgls_corrstrength_conditional_weights <- function(cov_train, rhs){
     chol_train <- try(chol(cov_train), silent=TRUE)
     if(!inherits(chol_train, "try-error")){
         tmp <- forwardsolve(t(chol_train), rhs)
@@ -113,12 +104,12 @@ corrshrink_diagnostics <- function(object, ...) UseMethod("corrshrink_diagnostic
     pseudoinverse(cov_train) %*% rhs
 }
 
-.mvgls_corrshrink_conditional_mean <- function(cov_cross, cov_train, residual_vec){
-    weights <- .mvgls_corrshrink_conditional_weights(cov_train, residual_vec)
+.mvgls_corrstrength_conditional_mean <- function(cov_cross, cov_train, residual_vec){
+    weights <- .mvgls_corrstrength_conditional_weights(cov_train, residual_vec)
     cov_cross %*% weights
 }
 
-.mvgls_corrshrink_prediction_cov <- function(tree, object, target_names){
+.mvgls_corrstrength_prediction_cov <- function(tree, object, target_names){
     if(is.null(target_names)) stop("You must provide species names to \"newdata\"")
     train_names <- rownames(object$variables$Y)
     if(is.null(train_names)) train_names <- object$variables$tree$tip.label
@@ -129,7 +120,7 @@ corrshrink_diagnostics <- function(object, ...) UseMethod("corrshrink_diagnostic
         stop("the \"newdata\" names does not matches names in the tree ")
     }
     if(any(target_names %in% train_names)){
-        stop("tree-based corr-shrink prediction expects target tips not already used in the training data")
+        stop("tree-based corr-strength prediction expects target tips not already used in the training data")
     }
 
     keep_tips <- unique(c(train_names, target_names))
@@ -139,12 +130,12 @@ corrshrink_diagnostics <- function(object, ...) UseMethod("corrshrink_diagnostic
     train_names <- train_names[train_names %in% tree$tip.label]
     target_names <- target_names[target_names %in% tree$tip.label]
 
-    omega <- .mvgls_corrshrink_omega_from_tree(object, tree=tree, internal=FALSE)
+    omega <- .mvgls_corrstrength_omega_from_tree(object, tree=tree, internal=FALSE)
     ntip <- Ntip(tree)
     target_idx <- match(target_names, tree$tip.label)
     train_idx <- match(train_names, tree$tip.label)
-    target_block <- .mvgls_corrshrink_block_index(target_idx, ntip, object$dims$p)
-    train_block <- .mvgls_corrshrink_block_index(train_idx, ntip, object$dims$p)
+    target_block <- .mvgls_corrstrength_block_index(target_idx, ntip, object$dims$p)
+    train_block <- .mvgls_corrstrength_block_index(train_idx, ntip, object$dims$p)
 
     list(
         omega_new_train = omega[target_block, train_block, drop=FALSE],
@@ -154,11 +145,11 @@ corrshrink_diagnostics <- function(object, ...) UseMethod("corrshrink_diagnostic
     )
 }
 
-.mvgls_corrshrink_normalized_residuals <- function(object){
-    Omega <- .mvgls_corrshrink_omega_from_tree(object, tree=object$variables$tree, internal=FALSE)
+.mvgls_corrstrength_normalized_residuals <- function(object){
+    Omega <- .mvgls_corrstrength_omega_from_tree(object, tree=object$variables$tree, internal=FALSE)
     chol_omega <- try(chol(Omega), silent=TRUE)
     if(inherits(chol_omega, "try-error")){
-        stop("failed to compute normalized residuals because the corr-shrink covariance is not positive definite")
+        stop("failed to compute normalized residuals because the corr-strength covariance is not positive definite")
     }
     residual_vec <- as.numeric(object$residuals)
     whitened <- backsolve(chol_omega, residual_vec, transpose=TRUE)
@@ -170,11 +161,11 @@ corrshrink_diagnostics <- function(object, ...) UseMethod("corrshrink_diagnostic
     residuals
 }
 
-.mvgls_corrshrink_predict_phylo <- function(object, X, sp_name, tree){
-    rcov <- .mvgls_corrshrink_prediction_cov(tree, object, sp_name)
+.mvgls_corrstrength_predict_phylo <- function(object, X, sp_name, tree){
+    rcov <- .mvgls_corrstrength_prediction_cov(tree, object, sp_name)
     predicted_mean <- X %*% object$coefficients
     residual_vec <- as.numeric(object$residuals[rcov$train, , drop=FALSE])
-    conditional <- .mvgls_corrshrink_conditional_mean(rcov$omega_new_train, rcov$omega_train, residual_vec)
+    conditional <- .mvgls_corrstrength_conditional_mean(rcov$omega_new_train, rcov$omega_train, residual_vec)
     conditional <- matrix(conditional,
         nrow=length(rcov$target),
         ncol=object$dims$p,
@@ -185,14 +176,14 @@ corrshrink_diagnostics <- function(object, ...) UseMethod("corrshrink_diagnostic
     predicted
 }
 
-.mvgls_corrshrink_ancestral <- function(object, predicted_fit){
+.mvgls_corrstrength_ancestral <- function(object, predicted_fit){
     tree <- object$variables$tree
-    omega <- .mvgls_corrshrink_omega_from_tree(object, tree=tree, internal=TRUE)
+    omega <- .mvgls_corrstrength_omega_from_tree(object, tree=tree, internal=TRUE)
     ntot <- Ntip(tree) + Nnode(tree)
     tip_idx <- indiceTip(tree, object$dims$p)
     node_idx <- setdiff(seq_len(ntot * object$dims$p), tip_idx)
     residual_vec <- as.numeric(object$residuals[tree$tip.label, , drop=FALSE])
-    conditional <- .mvgls_corrshrink_conditional_mean(
+    conditional <- .mvgls_corrstrength_conditional_mean(
         omega[node_idx, tip_idx, drop=FALSE],
         omega[tip_idx, tip_idx, drop=FALSE],
         residual_vec
@@ -207,8 +198,8 @@ corrshrink_diagnostics <- function(object, ...) UseMethod("corrshrink_diagnostic
 }
 
 .mvgls_bmm_nparam <- function(object){
-    if(.mvgls_is_corrshrink(object)){
-        if(is.null(object$df.free)) stop("corr-shrink BMM fits must store object$df.free")
+    if(.mvgls_is_corrstrength(object)){
+        if(is.null(object$df.free)) stop("corr-strength BMM fits must store object$df.free")
         return(object$df.free)
     }
     
@@ -216,19 +207,19 @@ corrshrink_diagnostics <- function(object, ...) UseMethod("corrshrink_diagnostic
     if(object$model=="BM") (length(object$start_values)-1) + length(object$coefficients) + p*(p + 1)/2 else length(object$start_values) + length(object$coefficients) + p*(p + 1)/2
 }
 
-.mvgls_corrshrink_loglik_guard <- function(object){
-    if(.mvgls_is_corrshrink(object) && object$method!="LL"){
-        stop("corr-shrink BMM is only implemented for fits with method=\"LL\"")
+.mvgls_corrstrength_loglik_guard <- function(object){
+    if(.mvgls_is_corrstrength(object) && object$method!="LL"){
+        stop("corr-strength BMM is only implemented for fits with method=\"LL\"")
     }
-    if(.mvgls_is_corrshrink(object) && isTRUE(object$REML)){
-        stop("corr-shrink BMM is only available for ML fits")
+    if(.mvgls_is_corrstrength(object) && isTRUE(object$REML)){
+        stop("corr-strength BMM is only available for ML fits")
     }
 }
 
-.mvgls_corrshrink_diagnostics <- function(object){
+.mvgls_corrstrength_diagnostics <- function(object){
     diagnostics <- NULL
     if(!is.null(object$diagnostics) && is.list(object$diagnostics)){
-        diagnostics <- object$diagnostics$corrshrink
+        diagnostics <- object$diagnostics$corrstrength
         if(is.null(diagnostics)) diagnostics <- object$diagnostics
     }
     if(is.null(diagnostics) || !is.list(diagnostics)) return(NULL)
@@ -264,9 +255,8 @@ corrshrink_diagnostics <- function(object, ...) UseMethod("corrshrink_diagnostic
         }
     }
 
-    cor_label <- .mvgls_corrshrink_cor_param_name(object)
-    boundary_rho <- diagnostics$boundary_rho
-    if(is.null(boundary_rho)) boundary_rho <- diagnostics$boundary_kappa
+    cor_label <- .mvgls_corrstrength_cor_param_name()
+    boundary_corr_strength <- diagnostics$boundary_corr_strength
     pathological_scale <- diagnostics$pathological_scale
     reference_regime <- diagnostics$reference_regime
     if(is.null(reference_regime) && !is.null(object$reference_regime)){
@@ -278,36 +268,36 @@ corrshrink_diagnostics <- function(object, ...) UseMethod("corrshrink_diagnostic
         selected_start_id = selected_start_id,
         reference_regime = reference_regime,
         max_scale = max_scale,
-        boundary_rho = boundary_rho,
+        boundary_corr_strength = boundary_corr_strength,
         cor_label = cor_label,
         pathological_scale = pathological_scale,
         start_table = start_table
     )
 }
 
-.mvgls_print_corrshrink_diagnostics <- function(object, digits = max(3L, getOption("digits") - 3L)){
-    info <- .mvgls_corrshrink_diagnostics(object)
+.mvgls_print_corrstrength_diagnostics <- function(object, digits = max(3L, getOption("digits") - 3L)){
+    info <- .mvgls_corrstrength_diagnostics(object)
     if(is.null(info)) return(invisible(NULL))
 
-    cat("Corr-shrink diagnostics:\n")
+    cat("Corr-strength diagnostics:\n")
     if(!is.null(info$nstarts)) cat("nstarts:", info$nstarts, "\n")
     if(!is.null(info$selected_start_id)) cat("selected start:", info$selected_start_id, "\n")
     if(!is.null(info$reference_regime)) cat("reference regime:", info$reference_regime, "\n")
     if(!is.null(info$max_scale)) cat("max scale:", round(info$max_scale, digits = digits), "\n")
-    if(!is.null(info$boundary_rho)) cat("boundary", info$cor_label, "flag:", info$boundary_rho, "\n")
+    if(!is.null(info$boundary_corr_strength)) cat("boundary", info$cor_label, "flag:", info$boundary_corr_strength, "\n")
     if(!is.null(info$pathological_scale)) cat("pathological scale flag:", info$pathological_scale, "\n")
     cat("\n")
     invisible(info)
 }
 
-.mvgls_corrshrink_regime_summary <- function(object){
-    if(!.mvgls_is_corrshrink(object)) return(NULL)
+.mvgls_corrstrength_regime_summary <- function(object){
+    if(!.mvgls_is_corrstrength(object)) return(NULL)
     if(is.null(object$sigma) || is.null(object$sigma$regime)) return(NULL)
 
     regime_names <- names(object$sigma$regime)
     if(is.null(regime_names)) regime_names <- seq_along(object$sigma$regime)
     p <- object$dims$p
-    cor_param <- .mvgls_corrshrink_cor_param_name(object)
+    cor_param <- .mvgls_corrstrength_cor_param_name()
 
     rows <- lapply(regime_names, function(regime_name){
         Sigma <- object$sigma$regime[[regime_name]]
@@ -322,8 +312,8 @@ corrshrink_diagnostics <- function(object, ...) UseMethod("corrshrink_diagnostic
 
         data.frame(
             reference = identical(regime_name, object$reference_regime),
-            scale = .mvgls_corrshrink_regime_param(object, regime_name, "scale"),
-            corr_strength = .mvgls_corrshrink_regime_param(object, regime_name, cor_param),
+            scale = .mvgls_corrstrength_regime_param(object, regime_name, "scale"),
+            corr_strength = .mvgls_corrstrength_regime_param(object, regime_name, cor_param),
             mean_rate = sum(diag_vals)/p,
             mean_variance = mean(diag_vals),
             mean_covariance = if(length(cov_vals)) mean(cov_vals) else 0,
@@ -340,7 +330,7 @@ corrshrink_diagnostics <- function(object, ...) UseMethod("corrshrink_diagnostic
     out
 }
 
-.mvgls_corrshrink_metric_summary <- function(values, level=0.95){
+.mvgls_corrstrength_metric_summary <- function(values, level=0.95){
     values <- as.numeric(values)
     values <- values[is.finite(values)]
     if(!length(values)){
@@ -355,7 +345,7 @@ corrshrink_diagnostics <- function(object, ...) UseMethod("corrshrink_diagnostic
     )
 }
 
-.mvgls_corrshrink_default_profile_grid <- function(estimate, parameter, points=9L){
+.mvgls_corrstrength_default_profile_grid <- function(estimate, parameter, points=9L){
     points <- as.integer(points[1])
     if(is.na(points) || points < 2L) points <- 9L
     if(identical(parameter, "scale")){
@@ -371,12 +361,10 @@ corrshrink_diagnostics <- function(object, ...) UseMethod("corrshrink_diagnostic
     }
 }
 
-.mvgls_corrshrink_profile_interval <- function(object, regime, parameter, level=0.95, profile_points=9L){
-    parameter <- match.arg(parameter, c("scale", .mvgls_corrshrink_cor_param_name(object)))
-    cor_param <- .mvgls_corrshrink_cor_param_name(object)
-    if(identical(parameter, cor_param)) parameter <- "kappa"
-    estimate_name <- if(identical(parameter, "kappa")) cor_param else parameter
-    estimate <- .mvgls_corrshrink_regime_param(object, regime, estimate_name)
+.mvgls_corrstrength_profile_interval <- function(object, regime, parameter, level=0.95, profile_points=9L){
+    parameter <- match.arg(parameter, c("scale", .mvgls_corrstrength_cor_param_name()))
+    cor_param <- .mvgls_corrstrength_cor_param_name()
+    estimate <- .mvgls_corrstrength_regime_param(object, regime, parameter)
     if(identical(regime, object$reference_regime)){
         return(list(
             low=estimate,
@@ -394,9 +382,9 @@ corrshrink_diagnostics <- function(object, ...) UseMethod("corrshrink_diagnostic
             error=NULL
         ))
     }
-    grid <- .mvgls_corrshrink_default_profile_grid(estimate, parameter, points=profile_points)
+    grid <- .mvgls_corrstrength_default_profile_grid(estimate, parameter, points=profile_points)
     prof <- tryCatch(
-        .mvgls_corrshrink_profile(
+        .mvgls_corrstrength_profile(
             object=object,
             parameter=parameter,
             regime=regime,
@@ -422,9 +410,9 @@ corrshrink_diagnostics <- function(object, ...) UseMethod("corrshrink_diagnostic
     )
 }
 
-.mvgls_corrshrink_refit_with_anchor <- function(object, anchor, echo=FALSE){
+.mvgls_corrstrength_refit_with_anchor <- function(object, anchor, echo=FALSE){
     if(is.null(object$model.frame)){
-        stop("corr-shrink anchor diagnostics require the original model.frame on the fitted object")
+        stop("corr-strength diagnostics require the original model.frame on the fitted object")
     }
     refit_args <- list(
         formula=object$formula,
@@ -434,7 +422,7 @@ corrshrink_diagnostics <- function(object, ...) UseMethod("corrshrink_diagnostic
         method="LL",
         REML=FALSE,
         response=as.matrix(object$variables$Y),
-        bmm.structure="corrshrink",
+        bmm.structure="corrstrength",
         bmm.reference=anchor,
         grid.search=FALSE,
         echo=echo
@@ -449,30 +437,30 @@ corrshrink_diagnostics <- function(object, ...) UseMethod("corrshrink_diagnostic
     do.call(mvgls, refit_args)
 }
 
-.mvgls_corrshrink_bootstrap_draws <- function(object, nboot=100L, nbcores=1L){
-    cor_param <- .mvgls_corrshrink_cor_param_name(object)
+.mvgls_corrstrength_bootstrap_draws <- function(object, nboot=100L, nbcores=1L){
+    cor_param <- .mvgls_corrstrength_cor_param_name()
     regime_names <- names(object$sigma$regime)
     if(is.null(regime_names)) regime_names <- character(0)
     draws <- .parallel_mapply(function(i){
         tryCatch({
             Yp <- simulate(object, nsim=1)
-            refit <- .mvgls_corrshrink_refit(object, Yp, start=object$opt$par)
-            diag <- .mvgls_corrshrink_diagnostics(refit)
-            kappa_max <- if(!is.null(refit$diagnostics$corrshrink$kappa_max)) {
-                refit$diagnostics$corrshrink$kappa_max
+            refit <- .mvgls_corrstrength_refit(object, Yp, start=object$opt$par)
+            diag <- .mvgls_corrstrength_diagnostics(refit)
+            corr_strength_max <- if(!is.null(refit$diagnostics$corrstrength$corr_strength_max)) {
+                refit$diagnostics$corrstrength$corr_strength_max
             }else{
                 NA_real_
             }
             param_rows <- lapply(regime_names, function(regime){
-                scale_est <- .mvgls_corrshrink_regime_param(refit, regime, "scale")
-                cor_est <- .mvgls_corrshrink_regime_param(refit, regime, cor_param)
+                scale_est <- .mvgls_corrstrength_regime_param(refit, regime, "scale")
+                cor_est <- .mvgls_corrstrength_regime_param(refit, regime, cor_param)
                 data.frame(
                     draw=i,
                     regime=regime,
                     reference=identical(regime, refit$reference_regime),
                     scale=scale_est,
                     corr_strength=cor_est,
-                    boundary=as.numeric(is.finite(cor_est) && (cor_est < 0.05 || (!is.na(kappa_max) && cor_est > 0.95 * kappa_max))),
+                    boundary=as.numeric(is.finite(cor_est) && (cor_est < 0.05 || (!is.na(corr_strength_max) && cor_est > 0.95 * corr_strength_max))),
                     runaway_scale=as.numeric(is.finite(scale_est) && scale_est > 20),
                     stringsAsFactors=FALSE
                 )
@@ -512,15 +500,15 @@ corrshrink_diagnostics <- function(object, ...) UseMethod("corrshrink_diagnostic
     list(parameter_draws=param_draws, regime_summary_draws=regime_summary_draws, n_success=length(draws))
 }
 
-.mvgls_corrshrink_parameter_summary <- function(object, level=0.95, profile_points=9L, bootstrap=NULL){
-    cor_param <- .mvgls_corrshrink_cor_param_name(object)
+.mvgls_corrstrength_parameter_summary <- function(object, level=0.95, profile_points=9L, bootstrap=NULL){
+    cor_param <- .mvgls_corrstrength_cor_param_name()
     regime_names <- names(object$sigma$regime)
     if(is.null(regime_names)) regime_names <- character(0)
     rows <- lapply(regime_names, function(regime){
         lapply(c("scale", cor_param), function(parameter){
-            estimate <- .mvgls_corrshrink_regime_param(object, regime, parameter)
+            estimate <- .mvgls_corrstrength_regime_param(object, regime, parameter)
             prof <- if(profile_points > 0L) {
-                .mvgls_corrshrink_profile_interval(object, regime, parameter, level=level, profile_points=profile_points)
+                .mvgls_corrstrength_profile_interval(object, regime, parameter, level=level, profile_points=profile_points)
             }else{
                 list(low=NA_real_, high=NA_real_, estimate=estimate, table=NULL, error=NULL)
             }
@@ -528,7 +516,7 @@ corrshrink_diagnostics <- function(object, ...) UseMethod("corrshrink_diagnostic
             boot_success <- 0L
             if(!is.null(bootstrap) && is.data.frame(bootstrap$parameter_draws) && nrow(bootstrap$parameter_draws) > 0L){
                 sub <- bootstrap$parameter_draws[bootstrap$parameter_draws$regime == regime, , drop=FALSE]
-                metric <- .mvgls_corrshrink_metric_summary(sub[[parameter]], level=level)
+                metric <- .mvgls_corrstrength_metric_summary(sub[[parameter]], level=level)
                 boot_low <- metric$low
                 boot_high <- metric$high
                 boot_mean <- metric$mean
@@ -557,10 +545,10 @@ corrshrink_diagnostics <- function(object, ...) UseMethod("corrshrink_diagnostic
     do.call(rbind, unlist(rows, recursive=FALSE))
 }
 
-.mvgls_corrshrink_regime_summary_diagnostics <- function(object, level=0.95, bootstrap=NULL){
-    info <- if(!is.null(object$regime.summary)) object$regime.summary else .mvgls_corrshrink_regime_summary(object)
+.mvgls_corrstrength_regime_summary_diagnostics <- function(object, level=0.95, bootstrap=NULL){
+    info <- if(!is.null(object$regime.summary)) object$regime.summary else .mvgls_corrstrength_regime_summary(object)
     if(is.null(info)) return(NULL)
-    metrics <- setdiff(colnames(info), c("reference", "scale", .mvgls_corrshrink_cor_param_name(object)))
+    metrics <- setdiff(colnames(info), c("reference", "scale", .mvgls_corrstrength_cor_param_name()))
     rows <- lapply(rownames(info), function(regime){
         lapply(metrics, function(metric){
             estimate <- info[regime, metric]
@@ -568,7 +556,7 @@ corrshrink_diagnostics <- function(object, ...) UseMethod("corrshrink_diagnostic
             boot_success <- 0L
             if(!is.null(bootstrap) && is.data.frame(bootstrap$regime_summary_draws) && nrow(bootstrap$regime_summary_draws) > 0L){
                 sub <- bootstrap$regime_summary_draws[bootstrap$regime_summary_draws$regime == regime, , drop=FALSE]
-                metric_summary <- .mvgls_corrshrink_metric_summary(sub[[metric]], level=level)
+                metric_summary <- .mvgls_corrstrength_metric_summary(sub[[metric]], level=level)
                 boot_low <- metric_summary$low
                 boot_high <- metric_summary$high
                 boot_mean <- metric_summary$mean
@@ -591,7 +579,7 @@ corrshrink_diagnostics <- function(object, ...) UseMethod("corrshrink_diagnostic
     do.call(rbind, unlist(rows, recursive=FALSE))
 }
 
-.mvgls_corrshrink_anchor_sensitivity <- function(object, anchors=NULL){
+.mvgls_corrstrength_anchor_sensitivity <- function(object, anchors=NULL){
     if(identical(anchors, FALSE)) return(NULL)
     regime_names <- names(object$sigma$regime)
     if(is.null(regime_names)) regime_names <- character(0)
@@ -600,7 +588,7 @@ corrshrink_diagnostics <- function(object, ...) UseMethod("corrshrink_diagnostic
     if(!length(anchors)) return(NULL)
 
     fits <- lapply(anchors, function(anchor){
-        tryCatch(.mvgls_corrshrink_refit_with_anchor(object, anchor=anchor, echo=FALSE), error=function(e) e)
+        tryCatch(.mvgls_corrstrength_refit_with_anchor(object, anchor=anchor, echo=FALSE), error=function(e) e)
     })
     names(fits) <- anchors
 
@@ -615,13 +603,13 @@ corrshrink_diagnostics <- function(object, ...) UseMethod("corrshrink_diagnostic
                 GIC=NA_real_,
                 selected_start=NA_integer_,
                 max_scale=NA_real_,
-                boundary_kappa=NA,
+                boundary_corr_strength=NA,
                 pathological_scale=NA,
                 error=conditionMessage(fit),
                 stringsAsFactors=FALSE
             ))
         }
-        diag <- fit$diagnostics$corrshrink
+        diag <- fit$diagnostics$corrstrength
         data.frame(
             anchor=fit$reference_regime,
             success=TRUE,
@@ -630,7 +618,7 @@ corrshrink_diagnostics <- function(object, ...) UseMethod("corrshrink_diagnostic
             GIC=GIC(fit)$GIC,
             selected_start=diag$selected_start_id %||% NA_integer_,
             max_scale=diag$max_scale %||% NA_real_,
-            boundary_kappa=diag$boundary_kappa %||% diag$boundary_rho %||% NA,
+            boundary_corr_strength=diag$boundary_corr_strength %||% NA,
             pathological_scale=diag$pathological_scale %||% NA,
             error=NA_character_,
             stringsAsFactors=FALSE
@@ -674,27 +662,27 @@ corrshrink_diagnostics <- function(object, ...) UseMethod("corrshrink_diagnostic
     list(anchor_summary=anchor_summary, pairwise_cov=pairwise_cov, acceptance=acceptance, fits=fits)
 }
 
-.mvgls_corrshrink_format_value <- function(x, digits=3){
+.mvgls_corrstrength_format_value <- function(x, digits=3){
     if(is.logical(x)) return(ifelse(is.na(x), "NA", ifelse(x, "TRUE", "FALSE")))
     if(is.character(x)) return(ifelse(is.na(x), "NA", x))
     x <- as.numeric(x)
     ifelse(is.na(x), "NA", formatC(x, digits=digits, format="f"))
 }
 
-corrshrink_diagnostics.mvgls <- function(object, level=0.95, nboot=100L, nbcores=1L, profile_points=9L, anchors=NULL, include_bootstrap_draws=FALSE, include_anchor_fits=FALSE, ...){
-    if(!.mvgls_is_corrshrink(object)){
-        stop("corrshrink_diagnostics() is only implemented for mvgls fits with bmm.structure=\"corrshrink\"")
+corrstrength_diagnostics.mvgls <- function(object, level=0.95, nboot=100L, nbcores=1L, profile_points=9L, anchors=NULL, include_bootstrap_draws=FALSE, include_anchor_fits=FALSE, ...){
+    if(!.mvgls_is_corrstrength(object)){
+        stop("corrstrength_diagnostics() is only implemented for mvgls fits with bmm.structure=\"corrstrength\"")
     }
-    .mvgls_corrshrink_loglik_guard(object)
+    .mvgls_corrstrength_loglik_guard(object)
     nboot <- as.integer(nboot[1])
     if(is.na(nboot) || nboot < 0L) stop("'nboot' must be a non-negative integer")
     profile_points <- as.integer(profile_points[1])
     if(is.na(profile_points) || profile_points < 0L) stop("'profile_points' must be a non-negative integer")
 
-    bootstrap <- if(nboot > 0L) .mvgls_corrshrink_bootstrap_draws(object, nboot=nboot, nbcores=nbcores) else NULL
-    parameter_summary <- .mvgls_corrshrink_parameter_summary(object, level=level, profile_points=profile_points, bootstrap=bootstrap)
-    regime_summary <- .mvgls_corrshrink_regime_summary_diagnostics(object, level=level, bootstrap=bootstrap)
-    anchor_sensitivity <- .mvgls_corrshrink_anchor_sensitivity(object, anchors=anchors)
+    bootstrap <- if(nboot > 0L) .mvgls_corrstrength_bootstrap_draws(object, nboot=nboot, nbcores=nbcores) else NULL
+    parameter_summary <- .mvgls_corrstrength_parameter_summary(object, level=level, profile_points=profile_points, bootstrap=bootstrap)
+    regime_summary <- .mvgls_corrstrength_regime_summary_diagnostics(object, level=level, bootstrap=bootstrap)
+    anchor_sensitivity <- .mvgls_corrstrength_anchor_sensitivity(object, anchors=anchors)
 
     results <- list(
         parameter_summary=parameter_summary,
@@ -710,11 +698,11 @@ corrshrink_diagnostics.mvgls <- function(object, level=0.95, nboot=100L, nbcores
     if(include_anchor_fits && !is.null(anchor_sensitivity)){
         results$anchor_fits <- anchor_sensitivity$fits
     }
-    class(results) <- "corrshrink_diagnostics"
+    class(results) <- "corrstrength_diagnostics"
     results
 }
 
-print.corrshrink_diagnostics <- function(x, digits = max(3L, getOption("digits") - 3L), ...){
+print.corrstrength_diagnostics <- function(x, digits = max(3L, getOption("digits") - 3L), ...){
     cat("Corr-strength diagnostics\n")
     if(!is.null(x$settings)){
         cat("level:", round(x$settings$level, digits = digits), "\n")
@@ -748,14 +736,14 @@ print.corrshrink_diagnostics <- function(x, digits = max(3L, getOption("digits")
     if(!is.null(x$acceptance)){
         cat("Acceptance checks:\n")
         cat("logLik spread < 5:", x$acceptance$logLik_spread_ok,
-            "(spread =", .mvgls_corrshrink_format_value(x$acceptance$logLik_spread, digits = digits), ")\n")
+            "(spread =", .mvgls_corrstrength_format_value(x$acceptance$logLik_spread, digits = digits), ")\n")
         cat("no pathological scale flags:", x$acceptance$no_pathological_scale, "\n")
     }
     invisible(x)
 }
 
-.mvgls_print_corrshrink_regime_summary <- function(object, digits = max(3L, getOption("digits") - 3L)){
-    info <- if(!is.null(object$regime.summary)) object$regime.summary else .mvgls_corrshrink_regime_summary(object)
+.mvgls_print_corrstrength_regime_summary <- function(object, digits = max(3L, getOption("digits") - 3L)){
+    info <- if(!is.null(object$regime.summary)) object$regime.summary else .mvgls_corrstrength_regime_summary(object)
     if(is.null(info)) return(invisible(NULL))
 
     display <- info
@@ -779,10 +767,10 @@ BIC.mvgls <- function(object, ...){
     # retrieve arguments
     args <- list(...)
     if(is.null(args[["REML"]])) args$forceREML <- TRUE else args$forceREML <- args$REML
-    .mvgls_corrshrink_loglik_guard(object)
+    .mvgls_corrstrength_loglik_guard(object)
     if(object$REML & args$forceREML==FALSE) LL <- .reml_to_ml(object) else LL <- object$logLik
 
-    if(.mvgls_is_corrshrink(object)){
+    if(.mvgls_is_corrstrength(object)){
         n <- object$dims$n
         nparam <- .mvgls_bmm_nparam(object)
         BIC <- -2*LL + log(n)*nparam
@@ -828,10 +816,10 @@ AIC.mvgls <- function(object, ..., k = 2){
     # retrieve arguments
     args <- list(...)
     if(is.null(args[["REML"]])) args$forceREML <- TRUE else args$forceREML <- args$REML
-    .mvgls_corrshrink_loglik_guard(object)
+    .mvgls_corrstrength_loglik_guard(object)
     if(object$REML & args$forceREML==FALSE) LL <- .reml_to_ml(object) else LL <- object$logLik
 
-    if(.mvgls_is_corrshrink(object)){
+    if(.mvgls_is_corrstrength(object)){
         nparam <- .mvgls_bmm_nparam(object)
         AIC <- -2*LL + k*nparam
 
@@ -871,9 +859,9 @@ GIC.mvgls <- function(object, ...){
     if(is.null(args[["eigSqm"]])) eigSqm <- TRUE else eigSqm <- args$eigSqm
     if(is.null(args[["REML"]])) args$forceREML <- TRUE else args$forceREML <- args$REML # force to true to follow what has been done in the first paper?
 
-    if(.mvgls_is_corrshrink(object)){
-        .mvgls_corrshrink_loglik_guard(object)
-        if(!is.null(args[["eigSqm"]]) && !isTRUE(args$eigSqm)) warning("The 'eigSqm' argument is ignored for corr-shrink BMM fits")
+    if(.mvgls_is_corrstrength(object)){
+        .mvgls_corrstrength_loglik_guard(object)
+        if(!is.null(args[["eigSqm"]]) && !isTRUE(args$eigSqm)) warning("The 'eigSqm' argument is ignored for corr-strength BMM fits")
         
         LL <- object$logLik
         n <- object$dims$n
@@ -1028,32 +1016,32 @@ EIC.mvgls <- function(object, nboot=100L, nbcores=1L, ...){
     
     # retrieve arguments
     args <- list(...)
-    if(.mvgls_is_corrshrink(object)){
-        .mvgls_corrshrink_loglik_guard(object)
-        if(!is.null(args[["eigSqm"]])) warning("The 'eigSqm' argument is ignored for corr-shrink BMM fits")
-        if(!is.null(args[["REML"]])) warning("The 'REML' argument is ignored for corr-shrink BMM fits")
+    if(.mvgls_is_corrstrength(object)){
+        .mvgls_corrstrength_loglik_guard(object)
+        if(!is.null(args[["eigSqm"]])) warning("The 'eigSqm' argument is ignored for corr-strength BMM fits")
+        if(!is.null(args[["REML"]])) warning("The 'REML' argument is ignored for corr-strength BMM fits")
         if(is.null(args[["restricted"]])) restricted <- FALSE else restricted <- args$restricted
         
-        llik <- .mvgls_corrshrink_loglik(object$variables$Y, object=object)
-        if(!is.finite(llik)) stop("The corr-shrink BMM likelihood could not be evaluated for the empirical fit")
+        llik <- .mvgls_corrstrength_loglik(object$variables$Y, object=object)
+        if(!is.finite(llik)) stop("The corr-strength BMM likelihood could not be evaluated for the empirical fit")
         bias <- .parallel_mapply(function(i){
             tryCatch({
                 Yp <- simulate(object, nsim=1)
-                objectBoot <- .mvgls_corrshrink_refit(object, Yp, start=object$opt$par)
+                objectBoot <- .mvgls_corrstrength_refit(object, Yp, start=object$opt$par)
                 
-                ll1 <- .mvgls_corrshrink_loglik(objectBoot$variables$Y, object=objectBoot)
-                if(!is.finite(ll1)) stop("The bootstrap corr-shrink fit produced a non-finite log-likelihood")
+                ll1 <- .mvgls_corrstrength_loglik(objectBoot$variables$Y, object=objectBoot)
+                if(!is.finite(ll1)) stop("The bootstrap corr-strength fit produced a non-finite log-likelihood")
                 
                 if(restricted){
-                    ll2 <- .mvgls_corrshrink_loglik(Yp, object=object, coefficients=objectBoot$coefficients)
-                    ll4 <- .mvgls_corrshrink_loglik(object$variables$Y, object=object, coefficients=object$coefficients,
+                    ll2 <- .mvgls_corrstrength_loglik(Yp, object=object, coefficients=objectBoot$coefficients)
+                    ll4 <- .mvgls_corrstrength_loglik(object$variables$Y, object=object, coefficients=object$coefficients,
                         sigma_object=objectBoot)
                 }else{
-                    ll2 <- .mvgls_corrshrink_loglik(Yp, object=object, coefficients=object$coefficients)
-                    ll4 <- .mvgls_corrshrink_loglik(object$variables$Y, object=object, coefficients=objectBoot$coefficients,
+                    ll2 <- .mvgls_corrstrength_loglik(Yp, object=object, coefficients=object$coefficients)
+                    ll4 <- .mvgls_corrstrength_loglik(object$variables$Y, object=object, coefficients=objectBoot$coefficients,
                         sigma_object=objectBoot)
                 }
-                if(!is.finite(ll2) || !is.finite(ll4)) stop("Cross-evaluated corr-shrink log-likelihood was non-finite")
+                if(!is.finite(ll2) || !is.finite(ll4)) stop("Cross-evaluated corr-strength log-likelihood was non-finite")
                 
                 (ll1 - ll2) + (llik - ll4)
             }, error=function(e){
@@ -1064,7 +1052,7 @@ EIC.mvgls <- function(object, nboot=100L, nbcores=1L, ...){
         if(sum(is.na(bias)) > 0L) warning("There were multiple issues/aborted estimations in the bootstrapped samples")
         bias <- bias[!is.na(bias)]
         nboot_eff <- length(bias)
-        if(nboot_eff == 0L) stop("All corr-shrink EIC bootstrap replicates failed")
+        if(nboot_eff == 0L) stop("All corr-strength EIC bootstrap replicates failed")
         
         pboot <- mean(bias)
         EIC <- -2*llik + 2*pboot
@@ -1403,9 +1391,9 @@ fitted.mvgls <- function(object, ...){
 # ------------------------------------------------------------------------- #
 residuals.mvgls <- function(object, type=c("response","normalized"), ...){
     type <- match.arg(type)[1]
-    if(.mvgls_is_corrshrink(object) && type=="normalized"){
-        .mvgls_corrshrink_loglik_guard(object)
-        residuals <- .mvgls_corrshrink_normalized_residuals(object)
+    if(.mvgls_is_corrstrength(object) && type=="normalized"){
+        .mvgls_corrstrength_loglik_guard(object)
+        residuals <- .mvgls_corrstrength_normalized_residuals(object)
     }else if(type=="response"){
         residuals <- object$residuals
     }else{
@@ -1423,9 +1411,9 @@ vcov.mvgls <- function(object, ...){
     args <- list(...)
     if(is.null(args[["type"]])) type <- "coef" else type <- args$type
     
-    if(.mvgls_is_corrshrink(object)){
+    if(.mvgls_is_corrstrength(object)){
         switch(type,
-        "covariance"={return(object$sigma$Pinv)},
+        "covariance"={return(object$sigma$pattern %||% object$sigma$Pinv)},
         "precision"={return(object$sigma$P)},
         "coef"={
             stop("coefficient covariance is not implemented for corr-strength BMM fits")
@@ -1463,12 +1451,12 @@ coef.mvgls <- function(object, ...){
 # ------------------------------------------------------------------------- #
 confint.mvgls <- function(object, parm=NULL, level=0.95, method=c("profile","bootstrap","both"), nboot=100L, nbcores=1L, profile_points=9L, ...){
     method <- match.arg(method)
-    if(!.mvgls_is_corrshrink(object)){
-        stop("confint() is only implemented for mvgls fits with bmm.structure=\"corrshrink\"")
+    if(!.mvgls_is_corrstrength(object)){
+        stop("confint() is only implemented for mvgls fits with bmm.structure=\"corrstrength\"")
     }
-    .mvgls_corrshrink_loglik_guard(object)
+    .mvgls_corrstrength_loglik_guard(object)
 
-    diag_obj <- corrshrink_diagnostics(
+    diag_obj <- corrstrength_diagnostics(
         object,
         level=level,
         nboot=if(identical(method, "profile")) 0L else nboot,
@@ -1478,7 +1466,7 @@ confint.mvgls <- function(object, parm=NULL, level=0.95, method=c("profile","boo
     )
 
     summary_df <- diag_obj$parameter_summary
-    requested <- .mvgls_corrshrink_parse_parm(object, parm)
+    requested <- .mvgls_corrstrength_parse_parm(object, parm)
     summary_df <- summary_df[match(requested, summary_df$label), , drop=FALSE]
     rownames(summary_df) <- summary_df$label
 
@@ -1500,8 +1488,8 @@ confint.mvgls <- function(object, parm=NULL, level=0.95, method=c("profile","boo
 # ------------------------------------------------------------------------- #
 logLik.mvgls<-function(object,...){
     
-    if(.mvgls_is_corrshrink(object)){
-        .mvgls_corrshrink_loglik_guard(object)
+    if(.mvgls_is_corrstrength(object)){
+        .mvgls_corrstrength_loglik_guard(object)
         return(object$logLik)
     }
     
@@ -1555,9 +1543,9 @@ print.mvgls <- function(x, digits = max(3L, getOption("digits") - 3L), ...){
         )
     }
 
-    if(.mvgls_is_corrshrink(x)){
-        .mvgls_print_corrshrink_regime_summary(x, digits = digits)
-        .mvgls_print_corrshrink_diagnostics(x, digits = digits)
+    if(.mvgls_is_corrstrength(x)){
+        .mvgls_print_corrstrength_regime_summary(x, digits = digits)
+        .mvgls_print_corrstrength_diagnostics(x, digits = digits)
     }
     
     # Regularization parameter
@@ -1616,9 +1604,9 @@ print.summary.mvgls <- function(x, digits = max(3, getOption("digits") - 3), ...
         )
     }
 
-    if(.mvgls_is_corrshrink(x)){
-        .mvgls_print_corrshrink_regime_summary(x, digits = digits)
-        .mvgls_print_corrshrink_diagnostics(x, digits = digits)
+    if(.mvgls_is_corrstrength(x)){
+        .mvgls_print_corrstrength_regime_summary(x, digits = digits)
+        .mvgls_print_corrstrength_diagnostics(x, digits = digits)
     }
     
     # Regularization parameter
@@ -1660,8 +1648,8 @@ summary.mvgls <- function(object, ...){
     # loocv or LL
     meth <- ifelse(object$REML, "REML", "ML")
 
-    if(.mvgls_is_corrshrink(object)){
-        .mvgls_corrshrink_loglik_guard(object)
+    if(.mvgls_is_corrstrength(object)){
+        .mvgls_corrstrength_loglik_guard(object)
         LL <- object$logLik
         nparam <- .mvgls_bmm_nparam(object)
         AIC <- -2*LL + 2*nparam
@@ -1669,7 +1657,7 @@ summary.mvgls <- function(object, ...){
         results.fit <- data.frame("AIC"=AIC, "GIC"=GIC, "logLik"=LL, row.names = " ")
         
         object$results.fit <- results.fit
-        object$regime.summary <- .mvgls_corrshrink_regime_summary(object)
+        object$regime.summary <- .mvgls_corrstrength_regime_summary(object)
         object$GLS <- if(inherits(object,"mvols")) FALSE else TRUE
         class(object) <- c("summary.mvgls","mvgls")
         return(object)
@@ -2053,11 +2041,11 @@ predict.mvgls <- function(object, newdata, ...){
     # GLS/OLS prediction
     if(is.null(tree)){
         predicted <- X%*%object$coefficients # simply return fitted values when newdata is empty
-    }else if(.mvgls_is_corrshrink(object)){
-        .mvgls_corrshrink_loglik_guard(object)
-        if(missing(newdata) || is.null(newdata)) stop("corr-shrink phylogenetic prediction requires a \"newdata\" data.frame with row names matching target tips")
-        if(is.null(rownames(newdata))) stop("corr-shrink phylogenetic prediction requires row names on \"newdata\" matching target tips")
-        predicted <- .mvgls_corrshrink_predict_phylo(object, X, predictors_names, tree)
+    }else if(.mvgls_is_corrstrength(object)){
+        .mvgls_corrstrength_loglik_guard(object)
+        if(missing(newdata) || is.null(newdata)) stop("corr-strength phylogenetic prediction requires a \"newdata\" data.frame with row names matching target tips")
+        if(is.null(rownames(newdata))) stop("corr-strength phylogenetic prediction requires row names on \"newdata\" matching target tips")
+        predicted <- .mvgls_corrstrength_predict_phylo(object, X, predictors_names, tree)
     }else{
         rcov <- .resid_cov_phylo(tree, object, predictors_names)
         predicted <- X%*%object$coefficients + rcov$w%*%solve(rcov$Vt)%*%object$residuals[rcov$train,,drop=FALSE] # FIXME account for (multivariate) variance scaling? Rao & Toutenberg => no just the correlation structure
@@ -2197,13 +2185,13 @@ ancestral.mvgls <- function(object, ...){
             if(!is.null(cl <- attr(Terms, "dataClasses"))) .checkMFClasses(cl, m)
             X <- model.matrix(Terms, m, contrasts.arg = object$contrasts)
             predicted_fit <- X %*% object$coefficients
-            if(.mvgls_is_corrshrink(object) && nrow(predicted_fit) != Nnode(object$variables$tree)){
-                stop("corr-shrink ancestral state estimation requires one row of predictors per internal node")
+            if(.mvgls_is_corrstrength(object) && nrow(predicted_fit) != Nnode(object$variables$tree)){
+                stop("corr-strength ancestral state estimation requires one row of predictors per internal node")
             }
             
         }else{
             # Just use the grand mean - i.e. the ancestral states at the root
-            if(.mvgls_is_corrshrink(object)){
+            if(.mvgls_is_corrstrength(object)){
                 root_mean <- object$variables$X[1, , drop=FALSE] %*% object$coefficients
                 predicted_fit <- matrix(root_mean,
                     nrow=Nnode(object$variables$tree),
@@ -2217,9 +2205,9 @@ ancestral.mvgls <- function(object, ...){
             }
         }
 
-        if(.mvgls_is_corrshrink(object)){
-            .mvgls_corrshrink_loglik_guard(object)
-            return(.mvgls_corrshrink_ancestral(object, predicted_fit))
+        if(.mvgls_is_corrstrength(object)){
+            .mvgls_corrstrength_loglik_guard(object)
+            return(.mvgls_corrstrength_ancestral(object, predicted_fit))
         }
         
         # start estimating ancestral states using GLS

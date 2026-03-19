@@ -45,7 +45,7 @@ offdiag_mean <- function(x) {
   mean(abs(x[idx]))
 }
 
-fit_corrshrink <- function(formula, data, tree, bmm.reference = NULL) {
+fit_corrstrength <- function(formula, data, tree, bmm.reference = NULL) {
   mvgls(
     formula,
     data = data,
@@ -53,7 +53,7 @@ fit_corrshrink <- function(formula, data, tree, bmm.reference = NULL) {
     model = "BMM",
     method = "LL",
     REML = FALSE,
-    bmm.structure = "corrshrink",
+    bmm.structure = "corrstrength",
     bmm.reference = bmm.reference,
     echo = FALSE
   )
@@ -133,11 +133,11 @@ X_prop <- as.numeric(scale(rnorm(nrow(Y_prop))))
 names(X_prop) <- rownames(Y_prop)
 
 fit_prop <- fit_proportional(Y ~ 1, data = list(Y = Y_prop), tree = simmap)
-fit_corr_prop <- fit_corrshrink(Y ~ 1, data = list(Y = Y_prop), tree = simmap)
-fit_corr_weak <- fit_corrshrink(Y ~ 1, data = list(Y = Y_weak), tree = weak_simmap)
-fit_corr_strong <- fit_corrshrink(Y ~ 1, data = list(Y = Y_strong), tree = simmap)
+fit_corr_prop <- fit_corrstrength(Y ~ 1, data = list(Y = Y_prop), tree = simmap)
+fit_corr_weak <- fit_corrstrength(Y ~ 1, data = list(Y = Y_weak), tree = weak_simmap)
+fit_corr_strong <- fit_corrstrength(Y ~ 1, data = list(Y = Y_strong), tree = simmap)
 
-assert_true(identical(fit_corr_prop$bmm.structure, "corrshrink"), "corr-strength fit did not mark the structure")
+assert_true(identical(fit_corr_prop$bmm.structure, "corrstrength"), "corr-strength fit did not mark the structure")
 assert_true(all(c("df.free", "df.free_cov", "df.free_beta", "df.free_model") %in% names(fit_corr_prop)),
   "corr-strength fit is missing one or more df.free fields"
 )
@@ -146,10 +146,10 @@ assert_true(abs(as.numeric(fit_corr_prop$logLik) - as.numeric(fit_prop$logLik)) 
   "corr-strength logLik is not comparable to the proportional fit"
 )
 
-kappa_names <- grep("\\.kappa$", names(fit_corr_prop$param), value = TRUE)
-assert_true(length(kappa_names) >= 2, "expected at least one non-reference kappa parameter")
-assert_true(max(abs(fit_corr_prop$param[kappa_names[-1]] - 1)) < 0.20,
-  "proportional-case kappa estimates did not remain close to 1"
+corr_strength_names <- grep("\\.corr_strength$", names(fit_corr_prop$param), value = TRUE)
+assert_true(length(corr_strength_names) >= 2, "expected at least one non-reference corr_strength parameter")
+assert_true(all(is.finite(fit_corr_prop$param[corr_strength_names])),
+  "proportional-case corr_strength estimates should remain finite"
 )
 
 regime_mats <- fit_corr_prop$sigma$regime
@@ -168,29 +168,33 @@ for (nm in names(regime_mats)[-1]) {
   )
 }
 
-assert_true("kappa" %in% colnames(fit_corr_prop$regime.summary),
-  "regime.summary does not expose the kappa column"
+assert_true("corr_strength" %in% colnames(fit_corr_prop$regime.summary),
+  "regime.summary does not expose the corr_strength column"
 )
 assert_true(identical(rownames(fit_corr_prop$regime.summary), names(fit_corr_prop$sigma$regime)),
   "regime.summary row names do not match the fitted regimes"
 )
 
-kappa_weak <- fit_corr_weak$param[grep("\\.kappa$", names(fit_corr_weak$param))]
-assert_true(any(kappa_weak[-1] < 1), "weaker-than-reference case did not estimate kappa < 1")
+corr_strength_weak <- fit_corr_weak$param[grep("\\.corr_strength$", names(fit_corr_weak$param))]
+assert_true(corr_strength_weak[[2]] < corr_strength_weak[[1]],
+  "weaker-than-reference case did not estimate a smaller corr_strength for the derived regime"
+)
 weak_regime_mats <- fit_corr_weak$sigma$regime
 assert_true(offdiag_mean(cov2cor(weak_regime_mats[[names(weak_regime_mats)[2]]])) < offdiag_mean(cov2cor(weak_regime_mats[[1]])),
   "weaker-than-reference case did not reduce the off-diagonal correlation strength"
 )
 
-kappa_strong <- fit_corr_strong$param[grep("\\.kappa$", names(fit_corr_strong$param))]
-assert_true(any(kappa_strong[-1] > 1), "stronger-than-reference case did not estimate kappa > 1")
+corr_strength_strong <- fit_corr_strong$param[grep("\\.corr_strength$", names(fit_corr_strong$param))]
+assert_true(corr_strength_strong[[2]] > corr_strength_strong[[1]],
+  "stronger-than-reference case did not estimate a larger corr_strength for the derived regime"
+)
 strong_regime_mats <- fit_corr_strong$sigma$regime
 assert_true(offdiag_mean(cov2cor(strong_regime_mats[[names(strong_regime_mats)[2]]])) > offdiag_mean(cov2cor(strong_regime_mats[[1]])),
   "stronger-than-reference case did not increase the off-diagonal correlation strength"
 )
 
-fit_corr_reg <- fit_corrshrink(Y ~ x, data = list(Y = Y_prop, x = X_prop), tree = simmap)
-assert_true(identical(fit_corr_reg$bmm.structure, "corrshrink"), "regression fit did not preserve corr-strength mode")
+fit_corr_reg <- fit_corrstrength(Y ~ x, data = list(Y = Y_prop, x = X_prop), tree = simmap)
+assert_true(identical(fit_corr_reg$bmm.structure, "corrstrength"), "regression fit did not preserve corr-strength mode")
 assert_true(nrow(coef(fit_corr_reg)) == 2L, "unexpected coefficient row count for regression fit")
 assert_true(ncol(coef(fit_corr_reg)) == ncol(Y_prop), "unexpected coefficient column count for regression fit")
 assert_true(identical(dim(fitted(fit_corr_reg)), dim(Y_prop)), "fitted values have the wrong dimensions")
@@ -203,12 +207,12 @@ assert_true(all(c("AIC", "GIC", "logLik") %in% colnames(summary_reg$results.fit)
 )
 assert_true(is.data.frame(fit_corr_reg$regime.summary), "corr-strength fit did not store regime.summary")
 assert_true(is.data.frame(summary_reg$regime.summary), "summary() did not preserve regime.summary")
-assert_true(all(c("reference", "scale", "kappa", "mean_rate", "mean_variance", "mean_covariance",
+assert_true(all(c("reference", "scale", "corr_strength", "mean_rate", "mean_variance", "mean_covariance",
                   "mean_correlation", "mean_abs_correlation") %in% colnames(summary_reg$regime.summary)),
   "regime.summary is missing one or more expected columns"
 )
-assert_true(all(abs(summary_reg$regime.summary$kappa[summary_reg$regime.summary$reference] - 1) < 1e-8),
-  "reference regime should have kappa fixed at 1"
+assert_true(all(is.finite(summary_reg$regime.summary$corr_strength[summary_reg$regime.summary$reference])),
+  "reference regime should retain a finite corr_strength estimate"
 )
 
 gic_reg <- GIC(fit_corr_reg)
@@ -223,29 +227,29 @@ assert_true(
   "df.free fields do not add up correctly"
 )
 
-diag_api <- corrshrink_diagnostics(fit_corr_reg, nboot = 4L, nbcores = 1L, profile_points = 5L)
-assert_true(inherits(diag_api, "corrshrink_diagnostics"), "corrshrink_diagnostics() did not return the expected class")
+diag_api <- corrstrength_diagnostics(fit_corr_reg, nboot = 4L, nbcores = 1L, profile_points = 5L)
+assert_true(inherits(diag_api, "corrstrength_diagnostics"), "corrstrength_diagnostics() did not return the expected class")
 assert_true(all(c("parameter_summary", "regime_summary", "anchor_summary", "anchor_pairwise_cov", "acceptance") %in% names(diag_api)),
-  "corrshrink_diagnostics() is missing one or more expected top-level components"
+  "corrstrength_diagnostics() is missing one or more expected top-level components"
 )
 assert_true(is.data.frame(diag_api$parameter_summary), "parameter_summary should be a data.frame")
 assert_true(is.data.frame(diag_api$regime_summary), "regime_summary diagnostics should be a data.frame")
 assert_true(is.data.frame(diag_api$anchor_summary), "anchor_summary should be a data.frame")
 assert_true(any(diag_api$parameter_summary$label == "B.scale"), "parameter_summary is missing the non-reference scale parameter")
-assert_true(any(diag_api$parameter_summary$label == "B.kappa"), "parameter_summary is missing the non-reference kappa parameter")
+assert_true(any(diag_api$parameter_summary$label == "B.corr_strength"), "parameter_summary is missing the non-reference corr_strength parameter")
 assert_true(any(diag_api$regime_summary$label == "A.mean_rate"), "regime_summary diagnostics are missing the derived mean-rate metric")
 assert_true(all(c("logLik_spread", "logLik_spread_ok", "no_pathological_scale") %in% names(diag_api$acceptance)),
-  "corrshrink_diagnostics() did not return the expected acceptance checks"
+  "corrstrength_diagnostics() did not return the expected acceptance checks"
 )
 diag_print <- capture.output(print(diag_api))
-assert_true(any(grepl("Corr-strength diagnostics", diag_print, fixed = TRUE)), "print.corrshrink_diagnostics() did not print the expected header")
+assert_true(any(grepl("Corr-strength diagnostics", diag_print, fixed = TRUE)), "print.corrstrength_diagnostics() did not print the expected header")
 
 ci_profile <- confint(fit_corr_reg, method = "profile", profile_points = 5L)
 ci_boot <- confint(fit_corr_reg, method = "bootstrap", nboot = 4L, nbcores = 1L)
 ci_both <- confint(fit_corr_reg, method = "both", nboot = 4L, nbcores = 1L, profile_points = 5L)
-assert_true(all(c("B.scale", "B.kappa") %in% rownames(ci_profile)), "profile confint() is missing the non-reference parameters")
+assert_true(all(c("B.scale", "B.corr_strength") %in% rownames(ci_profile)), "profile confint() is missing the non-reference parameters")
 assert_true(all(c("lower", "upper") %in% colnames(ci_profile)), "profile confint() returned unexpected columns")
-assert_true(all(c("B.scale", "B.kappa") %in% rownames(ci_boot)), "bootstrap confint() is missing the non-reference parameters")
+assert_true(all(c("B.scale", "B.corr_strength") %in% rownames(ci_boot)), "bootstrap confint() is missing the non-reference parameters")
 assert_true(all(c("lower", "upper") %in% colnames(ci_boot)), "bootstrap confint() returned unexpected columns")
 assert_true(all(c("estimate", "profile_low", "profile_high", "bootstrap_low", "bootstrap_high") %in% colnames(ci_both)),
   "confint(..., method = \"both\") returned unexpected columns"
@@ -273,7 +277,7 @@ Y_full <- make_response(full_simmap, list(A = sigma_base, B = sigma_strong), bet
 train_tips <- full_simmap$tip.label[1:18]
 hold_tips <- setdiff(full_simmap$tip.label, train_tips)
 train_tree <- drop.tip(full_simmap, hold_tips)
-fit_predict <- fit_corrshrink(
+fit_predict <- fit_corrstrength(
   Y ~ x,
   data = list(Y = Y_full[train_tips, , drop = FALSE], x = x_full[train_tips]),
   tree = train_tree

@@ -16,26 +16,39 @@ devtools::load_all(repo_root, quiet = TRUE)
 `%||%` <- function(x, y) if (is.null(x)) y else x
 
 env_int <- function(name, default) {
-  value <- Sys.getenv(name, unset = "")
-  if (!nzchar(value)) return(default)
-  parsed <- suppressWarnings(as.integer(value))
-  if (is.na(parsed) || parsed <= 0L) default else parsed
+  names <- as.character(name)
+  for (nm in names) {
+    value <- Sys.getenv(nm, unset = "")
+    if (!nzchar(value)) next
+    parsed <- suppressWarnings(as.integer(value))
+    if (!is.na(parsed) && parsed > 0L) return(parsed)
+  }
+  default
 }
 
-reps <- env_int("CORRSHRINK_IDENT_REPS", 6L)
-seed_base <- env_int("CORRSHRINK_IDENT_SEED", 20260319L)
+reps <- env_int(c("CORRSTRENGTH_IDENT_REPS", "CORRSHRINK_IDENT_REPS"), 6L)
+seed_base <- env_int(c("CORRSTRENGTH_IDENT_SEED", "CORRSHRINK_IDENT_SEED"), 20260319L)
 
 make_sigma <- function(sds, corr) {
   diag(sds) %*% corr %*% diag(sds)
 }
 
-apply_corrstrength <- function(base_sigma, scale, kappa) {
+apply_corrstrength <- function(base_sigma, scale, corr_strength) {
   V <- diag(diag(base_sigma))
   W <- base_sigma - V
-  scale * (V + kappa * W)
+  scale * (V + corr_strength * W)
 }
 
-start_helper <- getFromNamespace(".mvgls_bmm_corrshrink_start", "mvMORPH")
+start_helper <- NULL
+for (nm in c(".mvgls_bmm_corrstrength_start", ".mvgls_bmm_corrshrink_start")) {
+  if (exists(nm, envir = asNamespace("mvMORPH"), inherits = FALSE)) {
+    start_helper <- getFromNamespace(nm, "mvMORPH")
+    break
+  }
+}
+if (is.null(start_helper)) {
+  stop("corr-strength start helper was not found in the mvMORPH namespace", call. = FALSE)
+}
 
 make_simmap <- function(n_tips, state_counts, seed) {
   set.seed(seed)
@@ -66,7 +79,7 @@ simulate_response <- function(tree, sigma_by_regime, beta = NULL, x = NULL) {
   Y
 }
 
-fit_corrshrink <- function(formula, data, tree, start = NULL) {
+fit_corrstrength <- function(formula, data, tree, start = NULL) {
   mvgls(
     formula,
     data = data,
@@ -74,7 +87,7 @@ fit_corrshrink <- function(formula, data, tree, start = NULL) {
     model = "BMM",
     method = "LL",
     REML = FALSE,
-    bmm.structure = "corrshrink",
+    bmm.structure = "corrstrength",
     start = start,
     echo = FALSE
   )
@@ -94,9 +107,9 @@ prepare_design <- function(formula, data) {
 fit_modes <- function(formula, data, tree, X, Y) {
   single_start <- start_helper(tree, Y, X)
   list(
-    `single-start` = list(fit = try_fit(fit_corrshrink(formula, data = data, tree = tree, start = single_start)),
+    `single-start` = list(fit = try_fit(fit_corrstrength(formula, data = data, tree = tree, start = single_start)),
       start = single_start, mode = "single-start"),
-    `multi-start` = list(fit = try_fit(fit_corrshrink(formula, data = data, tree = tree)),
+    `multi-start` = list(fit = try_fit(fit_corrstrength(formula, data = data, tree = tree)),
       start = NULL, mode = "multi-start")
   )
 }
@@ -106,7 +119,7 @@ run_replicate <- function(scenario, rep_id) {
   derived_regime <- scenario$derived_regime %||% names(scenario$state_counts)[2]
   sigma_by_regime <- list(
     A = scenario$base_sigma,
-    B = apply_corrstrength(scenario$base_sigma, scenario$true_scale, scenario$true_kappa)
+    B = apply_corrstrength(scenario$base_sigma, scenario$true_scale, scenario$true_corr_strength)
   )
 
   x <- NULL
@@ -133,30 +146,31 @@ run_replicate <- function(scenario, rep_id) {
     fit <- entry$fit
     success <- !inherits(fit, "error")
     est_scale <- NA_real_
-    est_kappa <- NA_real_
+    est_corr_strength <- NA_real_
     if (success) {
       est_scale <- unname(fit$param[paste0(derived_regime, ".scale")])
-      est_kappa <- unname(fit$param[paste0(derived_regime, ".kappa")])
+      est_corr_strength <- unname(fit$param[paste0(derived_regime, ".corr_strength")])
     }
     data.frame(
       scenario = scenario$name,
       description = scenario$description,
       rep = rep_id,
       mode = entry$mode,
-      success_corrshrink = success,
+      success_corrstrength = success,
       n_tips = scenario$n_tips,
       p = nrow(scenario$base_sigma),
       with_covariate = isTRUE(scenario$with_covariate),
       true_scale = scenario$true_scale,
-      true_kappa = scenario$true_kappa,
+      true_corr_strength = scenario$true_corr_strength,
       est_scale = est_scale,
-      est_kappa = est_kappa,
+      est_corr_strength = est_corr_strength,
       scale_error = est_scale - scenario$true_scale,
-      kappa_error = est_kappa - scenario$true_kappa,
+      corr_strength_error = est_corr_strength - scenario$true_corr_strength,
       abs_scale_error = abs(est_scale - scenario$true_scale),
-      abs_kappa_error = abs(est_kappa - scenario$true_kappa),
+      abs_corr_strength_error = abs(est_corr_strength - scenario$true_corr_strength),
       runaway_scale = as.numeric(is.finite(est_scale) && est_scale > 20),
-      kappa_boundary = as.numeric(is.finite(est_kappa) && (est_kappa < 0.05 || est_kappa > 1.95)),
+      corr_strength_boundary = as.numeric(is.finite(est_corr_strength) &&
+        (est_corr_strength < 0.05 || est_corr_strength > 1.95)),
       mapped_fraction = mapped_fraction,
       stringsAsFactors = FALSE
     )
@@ -166,7 +180,7 @@ run_replicate <- function(scenario, rep_id) {
 }
 
 summarise_mode <- function(df) {
-  success_df <- df[df$success_corrshrink, , drop = FALSE]
+  success_df <- df[df$success_corrstrength, , drop = FALSE]
   data.frame(
     scenario = df$scenario[1],
     description = df$description[1],
@@ -175,19 +189,19 @@ summarise_mode <- function(df) {
     p = df$p[1],
     covariate = df$with_covariate[1],
     true_scale = df$true_scale[1],
-    true_kappa = df$true_kappa[1],
+    true_corr_strength = df$true_corr_strength[1],
     mapped_fraction_mean = mean(df$mapped_fraction),
-    success_rate = mean(df$success_corrshrink),
+    success_rate = mean(df$success_corrstrength),
     est_scale_mean = mean(success_df$est_scale),
     est_scale_median = stats::median(success_df$est_scale),
     est_scale_sd = stats::sd(success_df$est_scale),
-    est_kappa_mean = mean(success_df$est_kappa),
-    est_kappa_median = stats::median(success_df$est_kappa),
-    est_kappa_sd = stats::sd(success_df$est_kappa),
+    est_corr_strength_mean = mean(success_df$est_corr_strength),
+    est_corr_strength_median = stats::median(success_df$est_corr_strength),
+    est_corr_strength_sd = stats::sd(success_df$est_corr_strength),
     scale_rmse = sqrt(mean(success_df$scale_error^2)),
-    kappa_rmse = sqrt(mean(success_df$kappa_error^2)),
-    kappa_mae = mean(success_df$abs_kappa_error),
-    kappa_boundary_rate = mean(success_df$kappa_boundary),
+    corr_strength_rmse = sqrt(mean(success_df$corr_strength_error^2)),
+    corr_strength_mae = mean(success_df$abs_corr_strength_error),
+    corr_strength_boundary_rate = mean(success_df$corr_strength_boundary),
     runaway_scale_rate = mean(success_df$runaway_scale),
     stringsAsFactors = FALSE
   )
@@ -211,68 +225,68 @@ base_sigma_4 <- make_sigma(
 
 scenarios <- list(
   list(
-    name = "balanced_kappa100_p2",
+    name = "balanced_corr_strength100_p2",
     description = "Balanced regimes, 2 traits, proportional correlation-strength",
     n_tips = 18L,
     state_counts = c(A = 9L, B = 9L),
     base_sigma = base_sigma_2,
     true_scale = 1.8,
-    true_kappa = 1.0,
+    true_corr_strength = 1.0,
     with_covariate = FALSE,
     seed_offset = seed_base + 0L
   ),
   list(
-    name = "balanced_kappa025_p2",
+    name = "balanced_corr_strength025_p2",
     description = "Balanced regimes, 2 traits, weaker-than-reference correlation-strength",
     n_tips = 18L,
     state_counts = c(A = 9L, B = 9L),
     base_sigma = base_sigma_2,
     true_scale = 1.8,
-    true_kappa = 0.25,
+    true_corr_strength = 0.25,
     with_covariate = FALSE,
     seed_offset = seed_base + 100L
   ),
   list(
-    name = "stronger_kappa140_p2",
+    name = "stronger_corr_strength140_p2",
     description = "Balanced regimes, 2 traits, stronger-than-reference correlation-strength",
     n_tips = 18L,
     state_counts = c(A = 9L, B = 9L),
     base_sigma = base_sigma_2_strong,
     true_scale = 1.8,
-    true_kappa = 1.40,
+    true_corr_strength = 1.40,
     with_covariate = FALSE,
     seed_offset = seed_base + 200L
   ),
   list(
-    name = "sparse_regime_kappa025_p2",
+    name = "sparse_regime_corr_strength025_p2",
     description = "Sparse derived regime, 2 traits, weaker-than-reference correlation-strength",
     n_tips = 18L,
     state_counts = c(A = 15L, B = 3L),
     base_sigma = base_sigma_2,
     true_scale = 1.8,
-    true_kappa = 0.25,
+    true_corr_strength = 0.25,
     with_covariate = FALSE,
     seed_offset = seed_base + 300L
   ),
   list(
-    name = "weak_offdiag_kappa025_p2",
+    name = "weak_offdiag_corr_strength025_p2",
     description = "Balanced regimes, 2 traits, weak base off-diagonal signal",
     n_tips = 18L,
     state_counts = c(A = 9L, B = 9L),
     base_sigma = base_sigma_2_weak,
     true_scale = 1.8,
-    true_kappa = 0.25,
+    true_corr_strength = 0.25,
     with_covariate = FALSE,
     seed_offset = seed_base + 400L
   ),
   list(
-    name = "balanced_kappa100_p4_cov",
+    name = "balanced_corr_strength100_p4_cov",
     description = "Balanced regimes, 4 traits, one predictor",
     n_tips = 20L,
     state_counts = c(A = 10L, B = 10L),
     base_sigma = base_sigma_4,
     true_scale = 1.6,
-    true_kappa = 1.0,
+    true_corr_strength = 1.0,
     with_covariate = TRUE,
     beta = rbind(
       "(Intercept)" = c(0.4, -0.2, 0.1, 0.3),
@@ -307,21 +321,22 @@ fmt <- function(x, digits = 3) {
 }
 
 print_table <- summary_table[, c(
-  "scenario", "mode", "success_rate", "true_kappa", "est_kappa_mean", "est_kappa_median", "kappa_rmse",
+  "scenario", "mode", "success_rate", "true_corr_strength", "est_corr_strength_mean",
+  "est_corr_strength_median", "corr_strength_rmse",
   "true_scale", "est_scale_mean", "est_scale_median", "scale_rmse",
-  "mapped_fraction_mean", "kappa_boundary_rate", "runaway_scale_rate"
+  "mapped_fraction_mean", "corr_strength_boundary_rate", "runaway_scale_rate"
 )]
 print_table$success_rate <- fmt(print_table$success_rate, 2)
-print_table$true_kappa <- fmt(print_table$true_kappa, 2)
-print_table$est_kappa_mean <- fmt(print_table$est_kappa_mean, 2)
-print_table$est_kappa_median <- fmt(print_table$est_kappa_median, 2)
-print_table$kappa_rmse <- fmt(print_table$kappa_rmse, 2)
+print_table$true_corr_strength <- fmt(print_table$true_corr_strength, 2)
+print_table$est_corr_strength_mean <- fmt(print_table$est_corr_strength_mean, 2)
+print_table$est_corr_strength_median <- fmt(print_table$est_corr_strength_median, 2)
+print_table$corr_strength_rmse <- fmt(print_table$corr_strength_rmse, 2)
 print_table$true_scale <- fmt(print_table$true_scale, 2)
 print_table$est_scale_mean <- fmt(print_table$est_scale_mean, 2)
 print_table$est_scale_median <- fmt(print_table$est_scale_median, 2)
 print_table$scale_rmse <- fmt(print_table$scale_rmse, 2)
 print_table$mapped_fraction_mean <- fmt(print_table$mapped_fraction_mean, 2)
-print_table$kappa_boundary_rate <- fmt(print_table$kappa_boundary_rate, 2)
+print_table$corr_strength_boundary_rate <- fmt(print_table$corr_strength_boundary_rate, 2)
 print_table$runaway_scale_rate <- fmt(print_table$runaway_scale_rate, 2)
 
 cat("\nScenario summary\n")
@@ -334,12 +349,12 @@ comparison_table <- do.call(
     multi <- df[df$mode == "multi-start", , drop = FALSE]
     data.frame(
       scenario = single$scenario[1],
-      kappa_rmse_single = single$kappa_rmse,
-      kappa_rmse_multi = multi$kappa_rmse,
+      corr_strength_rmse_single = single$corr_strength_rmse,
+      corr_strength_rmse_multi = multi$corr_strength_rmse,
       scale_rmse_single = single$scale_rmse,
       scale_rmse_multi = multi$scale_rmse,
-      kappa_boundary_single = single$kappa_boundary_rate,
-      kappa_boundary_multi = multi$kappa_boundary_rate,
+      corr_strength_boundary_single = single$corr_strength_boundary_rate,
+      corr_strength_boundary_multi = multi$corr_strength_boundary_rate,
       runaway_scale_single = single$runaway_scale_rate,
       runaway_scale_multi = multi$runaway_scale_rate,
       stringsAsFactors = FALSE
@@ -349,12 +364,12 @@ comparison_table <- do.call(
 
 cat("\nSingle-start vs multi-start comparison\n")
 cmp_print <- comparison_table
-cmp_print$kappa_rmse_single <- fmt(cmp_print$kappa_rmse_single, 2)
-cmp_print$kappa_rmse_multi <- fmt(cmp_print$kappa_rmse_multi, 2)
+cmp_print$corr_strength_rmse_single <- fmt(cmp_print$corr_strength_rmse_single, 2)
+cmp_print$corr_strength_rmse_multi <- fmt(cmp_print$corr_strength_rmse_multi, 2)
 cmp_print$scale_rmse_single <- fmt(cmp_print$scale_rmse_single, 2)
 cmp_print$scale_rmse_multi <- fmt(cmp_print$scale_rmse_multi, 2)
-cmp_print$kappa_boundary_single <- fmt(cmp_print$kappa_boundary_single, 2)
-cmp_print$kappa_boundary_multi <- fmt(cmp_print$kappa_boundary_multi, 2)
+cmp_print$corr_strength_boundary_single <- fmt(cmp_print$corr_strength_boundary_single, 2)
+cmp_print$corr_strength_boundary_multi <- fmt(cmp_print$corr_strength_boundary_multi, 2)
 cmp_print$runaway_scale_single <- fmt(cmp_print$runaway_scale_single, 2)
 cmp_print$runaway_scale_multi <- fmt(cmp_print$runaway_scale_multi, 2)
 print(cmp_print, row.names = FALSE)
@@ -364,9 +379,9 @@ improvement_table <- do.call(
   lapply(split(comparison_table, comparison_table$scenario), function(df) {
     data.frame(
       scenario = df$scenario[1],
-      delta_kappa_rmse = df$kappa_rmse_multi - df$kappa_rmse_single,
+      delta_corr_strength_rmse = df$corr_strength_rmse_multi - df$corr_strength_rmse_single,
       delta_scale_rmse = df$scale_rmse_multi - df$scale_rmse_single,
-      delta_kappa_boundary = df$kappa_boundary_multi - df$kappa_boundary_single,
+      delta_corr_strength_boundary = df$corr_strength_boundary_multi - df$corr_strength_boundary_single,
       delta_runaway_scale = df$runaway_scale_multi - df$runaway_scale_single,
       stringsAsFactors = FALSE
     )
@@ -375,23 +390,23 @@ improvement_table <- do.call(
 
 cat("\nMulti-start deltas (multi minus single)\n")
 imp_print <- improvement_table
-imp_print$delta_kappa_rmse <- fmt(imp_print$delta_kappa_rmse, 2)
+imp_print$delta_corr_strength_rmse <- fmt(imp_print$delta_corr_strength_rmse, 2)
 imp_print$delta_scale_rmse <- fmt(imp_print$delta_scale_rmse, 2)
-imp_print$delta_kappa_boundary <- fmt(imp_print$delta_kappa_boundary, 2)
+imp_print$delta_corr_strength_boundary <- fmt(imp_print$delta_corr_strength_boundary, 2)
 imp_print$delta_runaway_scale <- fmt(imp_print$delta_runaway_scale, 2)
 print(imp_print, row.names = FALSE)
 
 low_info <- summary_table[
-  summary_table$kappa_rmse == max(summary_table$kappa_rmse) |
+  summary_table$corr_strength_rmse == max(summary_table$corr_strength_rmse) |
     summary_table$runaway_scale_rate == max(summary_table$runaway_scale_rate),
-  c("scenario", "mode", "mapped_fraction_mean", "kappa_rmse", "kappa_boundary_rate", "runaway_scale_rate")
+  c("scenario", "mode", "mapped_fraction_mean", "corr_strength_rmse", "corr_strength_boundary_rate", "runaway_scale_rate")
 ]
 rownames(low_info) <- NULL
 
 cat("\nPotential weak-identifiability flags\n")
 print(low_info, row.names = FALSE)
 
-if (!any(results$success_corrshrink)) {
+if (!any(results$success_corrstrength)) {
   stop("The identifiability study produced no successful corr-strength fits.", call. = FALSE)
 }
 

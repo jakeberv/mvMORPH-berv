@@ -16,10 +16,14 @@ devtools::load_all(repo_root, quiet = TRUE)
 `%||%` <- function(x, y) if (is.null(x)) y else x
 
 env_int <- function(name, default) {
-  value <- Sys.getenv(name, unset = "")
-  if (!nzchar(value)) return(default)
-  parsed <- suppressWarnings(as.integer(value))
-  if (is.na(parsed) || parsed <= 0L) default else parsed
+  names <- as.character(name)
+  for (nm in names) {
+    value <- Sys.getenv(nm, unset = "")
+    if (!nzchar(value)) next
+    parsed <- suppressWarnings(as.integer(value))
+    if (!is.na(parsed) && parsed > 0L) return(parsed)
+  }
+  default
 }
 
 get_internal <- function(candidates) {
@@ -31,21 +35,24 @@ get_internal <- function(candidates) {
   stop(sprintf("Could not find any of: %s", paste(candidates, collapse = ", ")), call. = FALSE)
 }
 
-profile_helper <- get_internal(c(".mvgls_bmm_corrshrink_profile", ".mvgls_corrshrink_profile"))
-refit_helper <- get_internal(c(".mvgls_corrshrink_refit"))
+profile_helper <- get_internal(c(
+  ".mvgls_bmm_corrstrength_profile", ".mvgls_corrstrength_profile",
+  ".mvgls_bmm_corrshrink_profile", ".mvgls_corrshrink_profile"
+))
+refit_helper <- get_internal(c(".mvgls_corrstrength_refit", ".mvgls_corrshrink_refit"))
 
-nboot <- env_int("CORRSHRINK_ANCHOR_BOOT", 4L)
-profile_points <- env_int("CORRSHRINK_ANCHOR_PROFILE_POINTS", 9L)
-seed_base <- env_int("CORRSHRINK_ANCHOR_SEED", 20260320L)
+nboot <- env_int(c("CORRSTRENGTH_ANCHOR_BOOT", "CORRSHRINK_ANCHOR_BOOT"), 4L)
+profile_points <- env_int(c("CORRSTRENGTH_ANCHOR_PROFILE_POINTS", "CORRSHRINK_ANCHOR_PROFILE_POINTS"), 9L)
+seed_base <- env_int(c("CORRSTRENGTH_ANCHOR_SEED", "CORRSHRINK_ANCHOR_SEED"), 20260320L)
 
 make_sigma <- function(sds, corr) {
   diag(sds) %*% corr %*% diag(sds)
 }
 
-apply_corrstrength <- function(base_sigma, scale, kappa) {
+apply_corrstrength <- function(base_sigma, scale, corr_strength) {
   V <- diag(diag(base_sigma))
   W <- base_sigma - V
-  scale * (V + kappa * W)
+  scale * (V + corr_strength * W)
 }
 
 make_simmap <- function(n_tips, state_counts, seed) {
@@ -72,7 +79,7 @@ simulate_response <- function(tree, sigma_by_regime, seed) {
   as.matrix(Y)
 }
 
-fit_corrshrink <- function(formula, data, tree, bmm.reference = NULL) {
+fit_corrstrength <- function(formula, data, tree, bmm.reference = NULL) {
   mvgls(
     formula,
     data = data,
@@ -80,7 +87,7 @@ fit_corrshrink <- function(formula, data, tree, bmm.reference = NULL) {
     model = "BMM",
     method = "LL",
     REML = FALSE,
-    bmm.structure = "corrshrink",
+    bmm.structure = "corrstrength",
     bmm.reference = bmm.reference,
     echo = FALSE
   )
@@ -103,7 +110,7 @@ make_scale_grid <- function(est, n = profile_points) {
   exp(seq(log(lo), log(hi), length.out = n))
 }
 
-make_kappa_grid <- function(est, n = profile_points) {
+make_corr_strength_grid <- function(est, n = profile_points) {
   center <- max(as.numeric(est), 0.02)
   lo <- max(0.01, center - 0.6)
   hi <- max(center + 0.6, lo * 1.5)
@@ -112,7 +119,7 @@ make_kappa_grid <- function(est, n = profile_points) {
 
 profile_interval <- function(fit, regime, parameter, level = 0.95) {
   est <- unname(fit$param[paste0(regime, ".", parameter)])
-  grid <- if (identical(parameter, "scale")) make_scale_grid(est) else make_kappa_grid(est)
+  grid <- if (identical(parameter, "scale")) make_scale_grid(est) else make_corr_strength_grid(est)
   prof <- tryCatch(
     do.call(profile_helper, list(object = fit, parameter = parameter, regime = regime, grid = grid)),
     error = function(e) e
@@ -148,14 +155,15 @@ bootstrap_free_params <- function(fit, nboot) {
     if (inherits(refit, "error")) next
     for (regime in free_regimes) {
       scale_est <- unname(refit$param[paste0(regime, ".scale")])
-      kappa_est <- unname(refit$param[paste0(regime, ".kappa")])
+      corr_strength_est <- unname(refit$param[paste0(regime, ".corr_strength")])
       rows[[idx]] <- data.frame(
         draw = draw_id,
         anchor = fit$reference_regime,
         regime = regime,
         scale = scale_est,
-        kappa = kappa_est,
-        kappa_boundary = as.numeric(is.finite(kappa_est) && (kappa_est < 0.05 || kappa_est > 1.95)),
+        corr_strength = corr_strength_est,
+        corr_strength_boundary = as.numeric(is.finite(corr_strength_est) &&
+          (corr_strength_est < 0.05 || corr_strength_est > 1.95)),
         runaway_scale = as.numeric(is.finite(scale_est) && scale_est > 20),
         stringsAsFactors = FALSE
       )
@@ -169,8 +177,8 @@ bootstrap_free_params <- function(fit, nboot) {
       anchor = character(0),
       regime = character(0),
       scale = numeric(0),
-      kappa = numeric(0),
-      kappa_boundary = numeric(0),
+      corr_strength = numeric(0),
+      corr_strength_boundary = numeric(0),
       runaway_scale = numeric(0),
       stringsAsFactors = FALSE
     )
@@ -200,8 +208,8 @@ base_sigma <- make_sigma(
 )
 sigma_by_regime <- list(
   A = base_sigma,
-  B = apply_corrstrength(base_sigma, scale = 1.7, kappa = 1.25),
-  C = apply_corrstrength(base_sigma, scale = 1.25, kappa = 0.35)
+  B = apply_corrstrength(base_sigma, scale = 1.7, corr_strength = 1.25),
+  C = apply_corrstrength(base_sigma, scale = 1.25, corr_strength = 0.35)
 )
 
 tree <- make_simmap(n_tips = 24L, state_counts = c(A = 8L, B = 8L, C = 8L), seed = seed_base)
@@ -209,11 +217,11 @@ Y <- simulate_response(tree, sigma_by_regime, seed = seed_base + 1L)
 data <- list(Y = Y)
 
 anchors <- names(sigma_by_regime)
-fits <- lapply(anchors, function(anchor) fit_corrshrink(Y ~ 1, data = data, tree = tree, bmm.reference = anchor))
+fits <- lapply(anchors, function(anchor) fit_corrstrength(Y ~ 1, data = data, tree = tree, bmm.reference = anchor))
 names(fits) <- anchors
 
 anchor_rows <- lapply(fits, function(fit) {
-  diag <- fit$diagnostics$corrshrink
+  diag <- fit$diagnostics$corrstrength
   data.frame(
     anchor = fit$reference_regime,
     logLik = as.numeric(fit$logLik),
@@ -221,7 +229,7 @@ anchor_rows <- lapply(fits, function(fit) {
     GIC = GIC(fit)$GIC,
     selected_start = diag$selected_start_id %||% NA_integer_,
     max_scale = diag$max_scale %||% NA_real_,
-    boundary_kappa = diag$boundary_kappa %||% NA,
+    boundary_corr_strength = diag$boundary_corr_strength %||% NA,
     pathological_scale = diag$pathological_scale %||% NA,
     stringsAsFactors = FALSE
   )
@@ -245,9 +253,9 @@ for (anchor in names(fits)) {
   }
   for (regime in free_regimes) {
     scale_profile <- profile_interval(fit, regime = regime, parameter = "scale")
-    kappa_profile <- profile_interval(fit, regime = regime, parameter = "kappa")
+    corr_strength_profile <- profile_interval(fit, regime = regime, parameter = "corr_strength")
     scale_boot <- bootstrap_summary(boot_df, regime = regime, parameter = "scale")
-    kappa_boot <- bootstrap_summary(boot_df, regime = regime, parameter = "kappa")
+    corr_strength_boot <- bootstrap_summary(boot_df, regime = regime, parameter = "corr_strength")
     boot_sub <- boot_df[boot_df$regime == regime, , drop = FALSE]
     param_rows[[length(param_rows) + 1L]] <- data.frame(
       anchor = anchor,
@@ -257,12 +265,12 @@ for (anchor in names(fits)) {
       scale_profile_high = scale_profile$high,
       scale_boot_low = scale_boot$low,
       scale_boot_high = scale_boot$high,
-      kappa_est = unname(fit$param[paste0(regime, ".kappa")]),
-      kappa_profile_low = kappa_profile$low,
-      kappa_profile_high = kappa_profile$high,
-      kappa_boot_low = kappa_boot$low,
-      kappa_boot_high = kappa_boot$high,
-      kappa_boot_boundary_rate = if (nrow(boot_sub)) mean(boot_sub$kappa_boundary) else NA_real_,
+      corr_strength_est = unname(fit$param[paste0(regime, ".corr_strength")]),
+      corr_strength_profile_low = corr_strength_profile$low,
+      corr_strength_profile_high = corr_strength_profile$high,
+      corr_strength_boot_low = corr_strength_boot$low,
+      corr_strength_boot_high = corr_strength_boot$high,
+      corr_strength_boot_boundary_rate = if (nrow(boot_sub)) mean(boot_sub$corr_strength_boundary) else NA_real_,
       scale_boot_runaway_rate = if (nrow(boot_sub)) mean(boot_sub$runaway_scale) else NA_real_,
       boot_success = scale_boot$n,
       stringsAsFactors = FALSE
@@ -315,7 +323,9 @@ anchor_print$logLik <- fmt(anchor_print$logLik, 3)
 anchor_print$AIC <- fmt(anchor_print$AIC, 3)
 anchor_print$GIC <- fmt(anchor_print$GIC, 3)
 anchor_print$max_scale <- fmt(anchor_print$max_scale, 2)
-if ("boundary_kappa" %in% names(anchor_print)) anchor_print$boundary_kappa <- fmt(anchor_print$boundary_kappa, 2)
+if ("boundary_corr_strength" %in% names(anchor_print)) {
+  anchor_print$boundary_corr_strength <- fmt(anchor_print$boundary_corr_strength, 2)
+}
 cat("Anchor-level fit summary\n")
 print(anchor_print, row.names = FALSE)
 

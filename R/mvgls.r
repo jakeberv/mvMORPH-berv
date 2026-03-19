@@ -15,7 +15,15 @@ mvgls <- function(formula, data=list(), tree, model, method=c("PL-LOOCV","LL"), 
     
     # Recover options
     args <- list(...)
-    if(is.null(args[["bmm.structure"]])) bmm.structure <- "proportional" else bmm.structure <- match.arg(args[["bmm.structure"]], c("proportional","corrshrink"))
+    if(is.null(args[["bmm.structure"]])){
+        bmm.structure <- "proportional"
+    }else{
+        bmm.structure <- as.character(args[["bmm.structure"]][1])
+        if(identical(bmm.structure, "corrshrink")){
+            stop("Use bmm.structure=\"corrstrength\" on this experimental branch")
+        }
+        bmm.structure <- match.arg(bmm.structure, c("proportional", "corrstrength"))
+    }
     if(is.null(args[["bmm.reference"]])) bmm.reference <- NULL else bmm.reference <- args[["bmm.reference"]]
     if(is.null(args[["scale.height"]])) scale.height <- FALSE else scale.height <- args$scale.height
     if(is.null(args[["echo"]])) echo <- FALSE else echo <- args$echo
@@ -114,7 +122,7 @@ mvgls <- function(formula, data=list(), tree, model, method=c("PL-LOOCV","LL"), 
     if(root_std==0 & model=="OUM") m = m + 1
     if(isTRUE(REML)) ndimCov = n - m else ndimCov = n
 
-    if(model=="BMM" && identical(bmm.structure, "corrshrink")){
+    if(model=="BMM" && identical(bmm.structure, "corrstrength")){
         return(.fit_mvgls_bmm_corrshrink(
             formula=formula,
             call_obj=match.call(),
