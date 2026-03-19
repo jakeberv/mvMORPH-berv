@@ -7,7 +7,7 @@ Fit linear model using Generalized Least Squares to multivariate (high-dimension
 }
 \description{
 This function uses maximum likelihood (or restricted likelihood) and penalized likelihood approaches to fit linear models where the errors are allowed to be correlated (i.e. a GLS model for serially correlated phylogenetic and time-series data). \code{mvgls} uses a penalized-likelihood (PL) approach (see descriptions in Clavel et al. 2019) to fit linear models to high-dimensional data sets (where the number of variables \emph{p} is approaching or is larger than the number of observations \emph{n}). The PL approach generally provides improved estimates compared to ML.
-An experimental \code{bmm.structure="corrshrink"} mode is also available for \code{model="BMM"} fits. It estimates a per-regime correlation-retention parameter in addition to the regime-specific scale factors.
+An experimental \code{bmm.structure="corrshrink"} mode is also available for \code{model="BMM"} fits. It estimates a per-regime correlation-retention parameter in addition to the regime-specific scale factors and uses deterministic multi-start optimization when \code{start} is omitted.
 
 %%  ~~ A concise (1-5 lines) description of what the function does. ~~
 }
@@ -46,14 +46,14 @@ Use REML (default) or ML for estimating the parameters.
 \item{...}{
 Options to be passed through. For instance the type of penalization: 
 \code{penalty="RidgeArch"} (default), \code{penalty="RidgeAlt"}, or \code{penalty="LASSO"}. The target matrices used by "RidgeArch" and "RidgeAlt" penalizations: \code{target="unitVariance"}, \code{target="Variance"} or \code{target="null"}... etc. (see details)
-For \code{model="BMM"}, the experimental option \code{bmm.structure="corrshrink"} selects a regime-specific correlation-shrinkage model. This mode is currently restricted to \code{method="LL"}, \code{REML=FALSE}, and \code{error=NULL}. It is intended for exploratory use only.
+For \code{model="BMM"}, the experimental option \code{bmm.structure="corrshrink"} selects a regime-specific correlation-shrinkage model. This mode is currently restricted to \code{method="LL"}, \code{REML=FALSE}, and \code{error=NULL}. When \code{start} is omitted, the optimizer runs a deterministic multi-start search; supplying \code{start} disables that default search and uses the provided start vector directly. The optional \code{bmm.reference} setting chooses which SIMMAP regime is fixed at \code{scale=1} and \code{rho=1}; it can be supplied as either a regime name or a 1-based regime index, and defaults to the first mapped regime. It is intended for exploratory use only.
 }
 
 }
 \details{
 \code{mvgls} allows fitting various multivariate linear models to multivariate (possibly high-dimensional, i.e. where the number of variables \emph{p} is larger than \emph{n}) datasets for which the residuals have a correlated structure (e.g. evolutionary models such as BM and OU). Models estimated using penalized likelihood (e.g., method="PL-LOOCV") are generally more accurate than those estimated by maximum likelihood methods (method="LL") when the number of traits approach the number of species. PL is the only solution when \emph{p}>\emph{n}.  Models fit can be compared using the GIC or EIC criterion (see ?\code{GIC} and ?\code{EIC}) and hypothesis testing can be performed using the \code{manova.gls} function.
 
-For the experimental BMM correlation-shrinkage mode, \code{GIC} and \code{EIC} are available and the fit can be used with \code{simulate()}. This branch returns a shared base covariance matrix together with per-regime covariance matrices, scale parameters, and correlation-retention parameters. The baseline regime is fixed for identifiability. The current experimental mode still does not support \code{predict()}, \code{ancestral()}, or normalized residuals.
+For the experimental BMM correlation-shrinkage mode, \code{GIC} and \code{EIC} are available and the fit can be used with \code{simulate()}. This branch returns a shared base covariance matrix together with per-regime covariance matrices, scale parameters, and correlation-retention parameters. A reference regime is fixed for identifiability and can be selected with \code{bmm.reference}; the default is the first mapped regime. The current experimental mode still does not support \code{predict()}, \code{ancestral()}, or normalized residuals.
 
 The tree is assumed to be fully dichotomic and in "postorder", otherwise the functions \code{multi2di} and \code{reorder.phylo} are used internally. Note that for the "BMM" model, a tree of class "simmap" must be provided to scale the BM variance-covariance matrix in different parts of the tree (see also \code{mvBM}).
 
@@ -93,6 +93,7 @@ An object of class '\code{mvgls}'. It contains a list including the following co
 \item{variables     }{the variables used for model fit}
 \item{sigma         }{the estimated covariance (Pinv) and precision (P) matrix, as well as the sample estimate (S); for the experimental BMM correlation-shrinkage mode, this also includes the per-regime covariance matrices}
 \item{bmm.structure  }{the BMM sub-structure used for the fit. The default is the proportional model; the experimental correlation-shrinkage mode is selected with \code{bmm.structure="corrshrink"}}
+\item{reference_regime}{for the experimental \code{bmm.structure="corrshrink"} mode, the SIMMAP regime fixed at \code{scale=1} and \code{rho=1} for identifiability}
 \item{model         }{the evolutionary model. But more generally, the model used to specify the structure within the residuals}
 \item{logLik	    	}{either the (negative) log-likelihood when \code{method="LL"} or the cross-validated penalized likelihood}
 \item{param			    }{the (evolutionary) model parameter estimates. For "BMM" this corresponds to the average rate (mean of the diagonal elements of the covariance matrix (Pinv)) in the proportional model, and to regime-specific scale and correlation-retention parameters in the experimental correlation-shrinkage mode.}
@@ -103,7 +104,8 @@ An object of class '\code{mvgls}'. It contains a list including the following co
 \item{tuning		    }{the regularization/tuning parameter estimated for the penalized likelihood}
 \item{mserr		    	}{the estimated standard error when \code{error=TRUE}}
 \item{start_values  }{the starting parameters used for the optimization of the LL or PL}
-\item{corrSt        }{a list including the transformed tree, the determinant obtained from its covariance matrix and the normalized variables (by the inverse square root of the covariance matrix of the phylogenetic tree or the time-series). For the experimental \code{bmm.structure="corrshrink"} mode this list may be reduced to the bookkeeping information needed by the likelihood evaluator.}
+\item{diagnostics   }{for experimental \code{bmm.structure="corrshrink"} fits, a list with a \code{corrshrink} component describing the deterministic multi-start search and fit stability flags, including \code{nstarts}, \code{selected_start_id}, \code{reference_regime}, the attempted \code{start_table}, and boundary/pathology indicators.}
+\item{corrSt        }{a list including the transformed tree, the determinant obtained from its covariance matrix and the normalized variables (by the inverse square root of the covariance matrix of the phylogenetic tree or the time-series). For the experimental \code{bmm.structure="corrshrink"} mode this list may be reduced to the bookkeeping information needed by the likelihood evaluator, including the selected reference regime.}
 \item{penalty       }{the penalty used for the penalized likelihood approach}
 \item{target        }{the target used with the "RidgeArch" or "RidgeAlt" penalized likelihood approaches}
 \item{REML	    		}{logical indicating if the REML (\code{TRUE}) or ML (\code{FALSE}) method has been used}

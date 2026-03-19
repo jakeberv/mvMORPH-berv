@@ -38,6 +38,78 @@ EIC <- function(object, nboot=100L, nbcores=1L, ...) UseMethod("EIC")
     }
 }
 
+.mvgls_corrshrink_diagnostics <- function(object){
+    diagnostics <- NULL
+    if(!is.null(object$diagnostics) && is.list(object$diagnostics)){
+        diagnostics <- object$diagnostics$corrshrink
+        if(is.null(diagnostics)) diagnostics <- object$diagnostics
+    }
+    if(is.null(diagnostics) || !is.list(diagnostics)) return(NULL)
+
+    start_table <- diagnostics$start_table
+    selected_row <- NULL
+    if(is.data.frame(start_table) && nrow(start_table) > 0L){
+        if("selected" %in% names(start_table) && any(start_table$selected %in% TRUE, na.rm = TRUE)){
+            selected_row <- start_table[start_table$selected %in% TRUE, , drop=FALSE][1, , drop=FALSE]
+        }else if("start_id" %in% names(start_table) && !is.null(diagnostics$selected_start_id)){
+            selected_idx <- which(start_table$start_id == diagnostics$selected_start_id)
+            if(length(selected_idx) > 0L) selected_row <- start_table[selected_idx[1], , drop=FALSE]
+        }
+    }
+
+    selected_start_id <- diagnostics$selected_start_id
+    if(is.null(selected_start_id) && !is.null(selected_row) && "start_id" %in% names(selected_row)){
+        selected_start_id <- selected_row$start_id[[1]]
+    }
+
+    nstarts <- diagnostics$nstarts
+    if(is.null(nstarts) && is.data.frame(start_table)) nstarts <- nrow(start_table)
+
+    max_scale <- diagnostics$max_scale
+    if(is.null(max_scale) && !is.null(selected_row) && "max_scale" %in% names(selected_row)){
+        max_scale <- selected_row$max_scale[[1]]
+    }
+    if((is.null(max_scale) || !is.numeric(max_scale) || !is.finite(max_scale)) && !is.null(object$param)){
+        scale_names <- grep("\\.scale$", names(object$param), value=TRUE)
+        if(length(scale_names) > 0L){
+            max_scale <- max(as.numeric(object$param[scale_names]), na.rm=TRUE)
+            if(!is.finite(max_scale)) max_scale <- NULL
+        }
+    }
+
+    boundary_rho <- diagnostics$boundary_rho
+    pathological_scale <- diagnostics$pathological_scale
+    reference_regime <- diagnostics$reference_regime
+    if(is.null(reference_regime) && !is.null(object$reference_regime)){
+        reference_regime <- object$reference_regime
+    }
+
+    list(
+        nstarts = nstarts,
+        selected_start_id = selected_start_id,
+        reference_regime = reference_regime,
+        max_scale = max_scale,
+        boundary_rho = boundary_rho,
+        pathological_scale = pathological_scale,
+        start_table = start_table
+    )
+}
+
+.mvgls_print_corrshrink_diagnostics <- function(object, digits = max(3L, getOption("digits") - 3L)){
+    info <- .mvgls_corrshrink_diagnostics(object)
+    if(is.null(info)) return(invisible(NULL))
+
+    cat("Corr-shrink diagnostics:\n")
+    if(!is.null(info$nstarts)) cat("nstarts:", info$nstarts, "\n")
+    if(!is.null(info$selected_start_id)) cat("selected start:", info$selected_start_id, "\n")
+    if(!is.null(info$reference_regime)) cat("reference regime:", info$reference_regime, "\n")
+    if(!is.null(info$max_scale)) cat("max scale:", round(info$max_scale, digits = digits), "\n")
+    if(!is.null(info$boundary_rho)) cat("boundary rho flag:", info$boundary_rho, "\n")
+    if(!is.null(info$pathological_scale)) cat("pathological scale flag:", info$pathological_scale, "\n")
+    cat("\n")
+    invisible(info)
+}
+
 # ------------------------------------------------------------------------- #
 # BIC.mvgls                                                                 #
 # options: object, ...                                                      #
@@ -787,6 +859,10 @@ print.mvgls <- function(x, digits = max(3L, getOption("digits") - 3L), ...){
         cat("parameter(s):",round(x$param, digits=digits),"\n\n")
         )
     }
+
+    if(.mvgls_is_corrshrink(x)){
+        .mvgls_print_corrshrink_diagnostics(x, digits = digits)
+    }
     
     # Regularization parameter
     if(!is.na(x$tuning)){
@@ -842,6 +918,10 @@ print.summary.mvgls <- function(x, digits = max(3, getOption("digits") - 3), ...
         "BMM"={print(round(x$param, digits=digits)); cat("\n")},
         cat("parameter(s):",round(x$param, digits=digits),"\n\n")
         )
+    }
+
+    if(.mvgls_is_corrshrink(x)){
+        .mvgls_print_corrshrink_diagnostics(x, digits = digits)
     }
     
     # Regularization parameter

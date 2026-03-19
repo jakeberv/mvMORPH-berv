@@ -35,6 +35,8 @@ apply_corrshrink <- function(base_sigma, scale, rho) {
   scale * (V + rho * W)
 }
 
+start_helper <- getFromNamespace(".mvgls_bmm_corrshrink_start", "mvMORPH")
+
 make_simmap <- function(n_tips, state_counts, seed) {
   set.seed(seed)
   tree <- phytools::pbtree(n = n_tips, scale = 1)
@@ -64,7 +66,7 @@ simulate_response <- function(tree, sigma_by_regime, beta = NULL, x = NULL) {
   Y
 }
 
-fit_corrshrink <- function(formula, data, tree) {
+fit_corrshrink <- function(formula, data, tree, start = NULL) {
   mvgls(
     formula,
     data = data,
@@ -73,24 +75,30 @@ fit_corrshrink <- function(formula, data, tree) {
     method = "LL",
     REML = FALSE,
     bmm.structure = "corrshrink",
-    echo = FALSE
-  )
-}
-
-fit_proportional <- function(formula, data, tree) {
-  mvgls(
-    formula,
-    data = data,
-    tree = tree,
-    model = "BMM",
-    method = "LL",
-    REML = FALSE,
+    start = start,
     echo = FALSE
   )
 }
 
 try_fit <- function(expr) {
   tryCatch(expr, error = function(e) e)
+}
+
+prepare_design <- function(formula, data) {
+  model_fr <- model.frame(formula = formula, data = data)
+  X <- model.matrix(attr(model_fr, "terms"), data = model_fr)
+  Y <- model.response(model_fr)
+  list(model_frame = model_fr, X = X, Y = as.matrix(Y))
+}
+
+fit_modes <- function(formula, data, tree, X, Y) {
+  single_start <- start_helper(tree, Y, X)
+  list(
+    `single-start` = list(fit = try_fit(fit_corrshrink(formula, data = data, tree = tree, start = single_start)),
+      start = single_start, mode = "single-start"),
+    `multi-start` = list(fit = try_fit(fit_corrshrink(formula, data = data, tree = tree)),
+      start = NULL, mode = "multi-start")
+  )
 }
 
 run_replicate <- function(scenario, rep_id) {
@@ -117,60 +125,52 @@ run_replicate <- function(scenario, rep_id) {
   data$Y <- Y
   data <- data[c("Y", setdiff(names(data), "Y"))]
 
-  fit_cs <- try_fit(fit_corrshrink(formula, data = data, tree = tree))
-  fit_prop <- try_fit(fit_proportional(formula, data = data, tree = tree))
-
-  success_cs <- !inherits(fit_cs, "error")
-  success_prop <- !inherits(fit_prop, "error")
-
-  est_scale <- NA_real_
-  est_rho <- NA_real_
-  aic_delta <- NA_real_
-  loglik_gain <- NA_real_
-  rho_boundary <- NA_real_
-
-  if (success_cs) {
-    est_scale <- unname(fit_cs$param[paste0(derived_regime, ".scale")])
-    est_rho <- unname(fit_cs$param[paste0(derived_regime, ".rho")])
-    rho_boundary <- as.numeric(est_rho < 0.05 || est_rho > 0.95)
-  }
-  if (success_cs && success_prop) {
-    aic_delta <- AIC(fit_prop)$AIC - AIC(fit_cs)$AIC
-    loglik_gain <- as.numeric(fit_cs$logLik - fit_prop$logLik)
-  }
-
+  design <- prepare_design(formula, data)
+  mode_fits <- fit_modes(formula, data, tree, design$X, design$Y)
   mapped_fraction <- sum(tree$mapped.edge[, derived_regime]) / sum(tree$edge.length)
 
-  data.frame(
-    scenario = scenario$name,
-    description = scenario$description,
-    rep = rep_id,
-    success_corrshrink = success_cs,
-    success_proportional = success_prop,
-    n_tips = scenario$n_tips,
-    p = nrow(scenario$base_sigma),
-    with_covariate = isTRUE(scenario$with_covariate),
-    true_scale = scenario$true_scale,
-    true_rho = scenario$true_rho,
-    est_scale = est_scale,
-    est_rho = est_rho,
-    scale_error = est_scale - scenario$true_scale,
-    rho_error = est_rho - scenario$true_rho,
-    abs_scale_error = abs(est_scale - scenario$true_scale),
-    abs_rho_error = abs(est_rho - scenario$true_rho),
-    aic_delta = aic_delta,
-    loglik_gain = loglik_gain,
-    rho_boundary = rho_boundary,
-    mapped_fraction = mapped_fraction,
-    stringsAsFactors = FALSE
-  )
+  rows <- lapply(mode_fits, function(entry) {
+    fit <- entry$fit
+    success <- !inherits(fit, "error")
+    est_scale <- NA_real_
+    est_rho <- NA_real_
+    if (success) {
+      est_scale <- unname(fit$param[paste0(derived_regime, ".scale")])
+      est_rho <- unname(fit$param[paste0(derived_regime, ".rho")])
+    }
+    data.frame(
+      scenario = scenario$name,
+      description = scenario$description,
+      rep = rep_id,
+      mode = entry$mode,
+      success_corrshrink = success,
+      n_tips = scenario$n_tips,
+      p = nrow(scenario$base_sigma),
+      with_covariate = isTRUE(scenario$with_covariate),
+      true_scale = scenario$true_scale,
+      true_rho = scenario$true_rho,
+      est_scale = est_scale,
+      est_rho = est_rho,
+      scale_error = est_scale - scenario$true_scale,
+      rho_error = est_rho - scenario$true_rho,
+      abs_scale_error = abs(est_scale - scenario$true_scale),
+      abs_rho_error = abs(est_rho - scenario$true_rho),
+      runaway_scale = as.numeric(is.finite(est_scale) && est_scale > 20),
+      rho_boundary = as.numeric(is.finite(est_rho) && (est_rho < 0.05 || est_rho > 0.95)),
+      mapped_fraction = mapped_fraction,
+      stringsAsFactors = FALSE
+    )
+  })
+
+  do.call(rbind, rows)
 }
 
-summarise_scenario <- function(df) {
+summarise_mode <- function(df) {
   success_df <- df[df$success_corrshrink, , drop = FALSE]
   data.frame(
     scenario = df$scenario[1],
     description = df$description[1],
+    mode = df$mode[1],
     n_tips = df$n_tips[1],
     p = df$p[1],
     covariate = df$with_covariate[1],
@@ -188,8 +188,7 @@ summarise_scenario <- function(df) {
     rho_rmse = sqrt(mean(success_df$rho_error^2)),
     rho_mae = mean(success_df$abs_rho_error),
     rho_boundary_rate = mean(success_df$rho_boundary),
-    mean_delta_aic_prop_minus_corr = mean(success_df$aic_delta),
-    mean_loglik_gain = mean(success_df$loglik_gain),
+    runaway_scale_rate = mean(success_df$runaway_scale),
     stringsAsFactors = FALSE
   )
 }
@@ -285,9 +284,10 @@ results <- do.call(
 
 summary_table <- do.call(
   rbind,
-  lapply(split(results, results$scenario), summarise_scenario)
+  lapply(split(results, list(results$scenario, results$mode), drop = TRUE), summarise_mode)
 )
-summary_table <- summary_table[match(vapply(scenarios, `[[`, character(1), "name"), summary_table$scenario), ]
+summary_table <- summary_table[order(match(summary_table$scenario, vapply(scenarios, `[[`, character(1), "name")),
+                                    match(summary_table$mode, c("single-start", "multi-start"))), ]
 rownames(summary_table) <- NULL
 
 fmt <- function(x, digits = 3) {
@@ -295,9 +295,9 @@ fmt <- function(x, digits = 3) {
 }
 
 print_table <- summary_table[, c(
-  "scenario", "success_rate", "true_rho", "est_rho_mean", "est_rho_median", "rho_rmse",
+  "scenario", "mode", "success_rate", "true_rho", "est_rho_mean", "est_rho_median", "rho_rmse",
   "true_scale", "est_scale_mean", "est_scale_median", "scale_rmse",
-  "mapped_fraction_mean", "rho_boundary_rate", "mean_delta_aic_prop_minus_corr"
+  "mapped_fraction_mean", "rho_boundary_rate", "runaway_scale_rate"
 )]
 print_table$success_rate <- fmt(print_table$success_rate, 2)
 print_table$true_rho <- fmt(print_table$true_rho, 2)
@@ -310,39 +310,69 @@ print_table$est_scale_median <- fmt(print_table$est_scale_median, 2)
 print_table$scale_rmse <- fmt(print_table$scale_rmse, 2)
 print_table$mapped_fraction_mean <- fmt(print_table$mapped_fraction_mean, 2)
 print_table$rho_boundary_rate <- fmt(print_table$rho_boundary_rate, 2)
-print_table$mean_delta_aic_prop_minus_corr <- fmt(print_table$mean_delta_aic_prop_minus_corr, 2)
+print_table$runaway_scale_rate <- fmt(print_table$runaway_scale_rate, 2)
 
 cat("\nScenario summary\n")
 print(print_table, row.names = FALSE)
 
-best_rho <- summary_table[which.min(summary_table$rho_rmse), , drop = FALSE]
-worst_rho <- summary_table[which.max(summary_table$rho_rmse), , drop = FALSE]
-best_scale <- summary_table[which.min(summary_table$scale_rmse), , drop = FALSE]
+comparison_table <- do.call(
+  rbind,
+  lapply(split(summary_table, summary_table$scenario), function(df) {
+    single <- df[df$mode == "single-start", , drop = FALSE]
+    multi <- df[df$mode == "multi-start", , drop = FALSE]
+    data.frame(
+      scenario = single$scenario[1],
+      rho_rmse_single = single$rho_rmse,
+      rho_rmse_multi = multi$rho_rmse,
+      scale_rmse_single = single$scale_rmse,
+      scale_rmse_multi = multi$scale_rmse,
+      rho_boundary_single = single$rho_boundary_rate,
+      rho_boundary_multi = multi$rho_boundary_rate,
+      runaway_scale_single = single$runaway_scale_rate,
+      runaway_scale_multi = multi$runaway_scale_rate,
+      stringsAsFactors = FALSE
+    )
+  })
+)
 
-cat("\nTakeaways\n")
-cat(
-  "- Best rho recovery:", best_rho$scenario,
-  "with mean rho", fmt(best_rho$est_rho_mean, 2),
-  "for true rho", fmt(best_rho$true_rho, 2),
-  "and rho RMSE", fmt(best_rho$rho_rmse, 2), "\n"
+cat("\nSingle-start vs multi-start comparison\n")
+cmp_print <- comparison_table
+cmp_print$rho_rmse_single <- fmt(cmp_print$rho_rmse_single, 2)
+cmp_print$rho_rmse_multi <- fmt(cmp_print$rho_rmse_multi, 2)
+cmp_print$scale_rmse_single <- fmt(cmp_print$scale_rmse_single, 2)
+cmp_print$scale_rmse_multi <- fmt(cmp_print$scale_rmse_multi, 2)
+cmp_print$rho_boundary_single <- fmt(cmp_print$rho_boundary_single, 2)
+cmp_print$rho_boundary_multi <- fmt(cmp_print$rho_boundary_multi, 2)
+cmp_print$runaway_scale_single <- fmt(cmp_print$runaway_scale_single, 2)
+cmp_print$runaway_scale_multi <- fmt(cmp_print$runaway_scale_multi, 2)
+print(cmp_print, row.names = FALSE)
+
+improvement_table <- do.call(
+  rbind,
+  lapply(split(comparison_table, comparison_table$scenario), function(df) {
+    data.frame(
+      scenario = df$scenario[1],
+      delta_rho_rmse = df$rho_rmse_multi - df$rho_rmse_single,
+      delta_scale_rmse = df$scale_rmse_multi - df$scale_rmse_single,
+      delta_rho_boundary = df$rho_boundary_multi - df$rho_boundary_single,
+      delta_runaway_scale = df$runaway_scale_multi - df$runaway_scale_single,
+      stringsAsFactors = FALSE
+    )
+  })
 )
-cat(
-  "- Weakest rho recovery:", worst_rho$scenario,
-  "with mean rho", fmt(worst_rho$est_rho_mean, 2),
-  "for true rho", fmt(worst_rho$true_rho, 2),
-  "and rho RMSE", fmt(worst_rho$rho_rmse, 2), "\n"
-)
-cat(
-  "- Best scale recovery:", best_scale$scenario,
-  "with mean scale", fmt(best_scale$est_scale_mean, 2),
-  "for true scale", fmt(best_scale$true_scale, 2),
-  "and scale RMSE", fmt(best_scale$scale_rmse, 2), "\n"
-)
+
+cat("\nMulti-start deltas (multi minus single)\n")
+imp_print <- improvement_table
+imp_print$delta_rho_rmse <- fmt(imp_print$delta_rho_rmse, 2)
+imp_print$delta_scale_rmse <- fmt(imp_print$delta_scale_rmse, 2)
+imp_print$delta_rho_boundary <- fmt(imp_print$delta_rho_boundary, 2)
+imp_print$delta_runaway_scale <- fmt(imp_print$delta_runaway_scale, 2)
+print(imp_print, row.names = FALSE)
 
 low_info <- summary_table[
   summary_table$rho_rmse == max(summary_table$rho_rmse) |
-    summary_table$mapped_fraction_mean == min(summary_table$mapped_fraction_mean),
-  c("scenario", "description", "mapped_fraction_mean", "rho_rmse", "rho_boundary_rate")
+    summary_table$runaway_scale_rate == max(summary_table$runaway_scale_rate),
+  c("scenario", "mode", "mapped_fraction_mean", "rho_rmse", "rho_boundary_rate", "runaway_scale_rate")
 ]
 rownames(low_info) <- NULL
 

@@ -16,6 +16,7 @@ mvgls <- function(formula, data=list(), tree, model, method=c("PL-LOOCV","LL"), 
     # Recover options
     args <- list(...)
     if(is.null(args[["bmm.structure"]])) bmm.structure <- "proportional" else bmm.structure <- match.arg(args[["bmm.structure"]], c("proportional","corrshrink"))
+    if(is.null(args[["bmm.reference"]])) bmm.reference <- NULL else bmm.reference <- args[["bmm.reference"]]
     if(is.null(args[["scale.height"]])) scale.height <- FALSE else scale.height <- args$scale.height
     if(is.null(args[["echo"]])) echo <- FALSE else echo <- args$echo
     if(is.null(args[["grid.search"]])) grid_search <- TRUE else grid_search <- args$grid.search
@@ -135,7 +136,8 @@ mvgls <- function(formula, data=list(), tree, model, method=c("PL-LOOCV","LL"), 
             mserr=mserr,
             FCI=FCI,
             hessian=hessian,
-            scale.height=scale.height
+            scale.height=scale.height,
+            bmm_reference=bmm.reference
         ))
     }
     
