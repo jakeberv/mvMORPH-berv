@@ -912,7 +912,7 @@
         },
         "OUMvcv"={
            if(par==corrModel$bounds$upper[indice]) warning("Parameter search reached the upper bound. You should consider increasing the \"upper\" argument value ")
-        },
+        }
     )
 }
 

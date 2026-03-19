@@ -15,6 +15,7 @@ mvgls <- function(formula, data=list(), tree, model, method=c("PL-LOOCV","LL"), 
     
     # Recover options
     args <- list(...)
+    if(is.null(args[["bmm.structure"]])) bmm.structure <- "proportional" else bmm.structure <- match.arg(args[["bmm.structure"]], c("proportional","corrshrink"))
     if(is.null(args[["scale.height"]])) scale.height <- FALSE else scale.height <- args$scale.height
     if(is.null(args[["echo"]])) echo <- FALSE else echo <- args$echo
     if(is.null(args[["grid.search"]])) grid_search <- TRUE else grid_search <- args$grid.search
@@ -111,6 +112,32 @@ mvgls <- function(formula, data=list(), tree, model, method=c("PL-LOOCV","LL"), 
     
     if(root_std==0 & model=="OUM") m = m + 1
     if(isTRUE(REML)) ndimCov = n - m else ndimCov = n
+
+    if(model=="BMM" && identical(bmm.structure, "corrshrink")){
+        return(.fit_mvgls_bmm_corrshrink(
+            formula=formula,
+            call_obj=match.call(),
+            model_fr=model_fr,
+            X=X,
+            Y=Y,
+            tree=tree,
+            terms=terms,
+            xlevels=xlevels,
+            contrasts=contrasts,
+            assign=assign,
+            qrx=qrx,
+            method=method,
+            REML=REML,
+            penalty=penalty,
+            target=target,
+            optimization=optimization,
+            start=start,
+            mserr=mserr,
+            FCI=FCI,
+            hessian=hessian,
+            scale.height=scale.height
+        ))
+    }
     
     # CorrStruct object (include data, model, covariance...)
     if(scale.height) tree <- .scaleStruct(tree)
@@ -157,7 +184,7 @@ mvgls <- function(formula, data=list(), tree, model, method=c("PL-LOOCV","LL"), 
     ll_value <- -estimModel$value # either the loocv or the regular likelihood (minus because we minimize)
     const_mtdist = NA # Not efficient
     if(method=="EmpBayes" & comp_ll==TRUE){
-        v = p + 1 # This needs to be modified if it is allowed to select different values for v
+        v = p + 1 # This needs to be modified if it is allowed to select different values for v
         const_mtdist = -(lmvgamma((v+ndimCov+p-1)/2, p) - lmvgamma((v+p-1)/2, p) - 0.5*(ndimCov*p*log(pi)))
         ll_value = -(estimModel$value + const_mtdist)
     }

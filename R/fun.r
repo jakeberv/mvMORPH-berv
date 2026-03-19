@@ -850,7 +850,7 @@ build.chol<-function(b,p){
         precalc <- mv.Precalc(phy, nb.traits=1, param=list(model="OU1", root=root))
         X <- .Call(mvmorph_weights, nterm=as.integer(n), epochs=precalc$epochs, lambda=param, S=1, S1=1, beta=precalc$listReg, root=as.integer(0))
         if(root==TRUE) colnames(X) <- c("root","optimum") else colnames(X) <- c("optimum")
-    },
+    }
     )
     
     return(X)
@@ -1313,13 +1313,43 @@ simulate.mvmorph<-function(object,nsim=1,seed=NULL,...){
 
 ## Wrapper to mvSIM for mvgls/mvols objects
 simulate.mvgls<-function(object,nsim=1,seed=NULL,...){
-  
   # parameters
   param <- list(...)
   p <- object$dims$p
-  n <- object$dims$n
   theta <- numeric(p)
   if(is.null(param[["method"]])){ methodSim <- "cholesky" }else{ methodSim <- param$method }
+  if(!is.null(seed)) set.seed(seed)
+  
+  if(isTRUE(!is.null(object$bmm.structure) && identical(object$bmm.structure, "corrshrink"))){
+    residuals_sim <- mvSIM(
+      tree=object$variables$tree,
+      model="BMM",
+      param=list(
+        sigma=object$sigma$regime,
+        theta=rep(0, p),
+        smean=TRUE,
+        method=methodSim
+      ),
+      nsim=nsim
+    )
+    effects <- fitted(object)
+    response_names <- dimnames(object$variables$Y)
+    if(nsim > 1){
+      new_dataset <- lapply(residuals_sim, function(resid){
+        sim <- effects + resid
+        rownames(sim) <- response_names[[1]]
+        colnames(sim) <- response_names[[2]]
+        sim
+      })
+    }else{
+      new_dataset <- effects + residuals_sim
+      rownames(new_dataset) <- response_names[[1]]
+      colnames(new_dataset) <- response_names[[2]]
+    }
+    return(new_dataset)
+  }
+  
+  n <- object$dims$n
   
   if(!is.ultrametric(object$variables$tree) & (object$model=="OU" | object$model=="OUM")){
     

@@ -15,6 +15,29 @@
 GIC <- function(object, ...) UseMethod("GIC")
 EIC <- function(object, nboot=100L, nbcores=1L, ...) UseMethod("EIC")
 
+.mvgls_is_corrshrink <- function(object){
+    isTRUE(!is.null(object$bmm.structure) && identical(object$bmm.structure, "corrshrink"))
+}
+
+.mvgls_bmm_nparam <- function(object){
+    if(.mvgls_is_corrshrink(object)){
+        if(is.null(object$df.free)) stop("corr-shrink BMM fits must store object$df.free")
+        return(object$df.free)
+    }
+    
+    p <- object$dims$p
+    if(object$model=="BM") (length(object$start_values)-1) + length(object$coefficients) + p*(p + 1)/2 else length(object$start_values) + length(object$coefficients) + p*(p + 1)/2
+}
+
+.mvgls_corrshrink_loglik_guard <- function(object){
+    if(.mvgls_is_corrshrink(object) && object$method!="LL"){
+        stop("corr-shrink BMM is only implemented for fits with method=\"LL\"")
+    }
+    if(.mvgls_is_corrshrink(object) && isTRUE(object$REML)){
+        stop("corr-shrink BMM is only available for ML fits")
+    }
+}
+
 # ------------------------------------------------------------------------- #
 # BIC.mvgls                                                                 #
 # options: object, ...                                                      #
@@ -26,7 +49,18 @@ BIC.mvgls <- function(object, ...){
     # retrieve arguments
     args <- list(...)
     if(is.null(args[["REML"]])) args$forceREML <- TRUE else args$forceREML <- args$REML
+    .mvgls_corrshrink_loglik_guard(object)
     if(object$REML & args$forceREML==FALSE) LL <- .reml_to_ml(object) else LL <- object$logLik
+
+    if(.mvgls_is_corrshrink(object)){
+        n <- object$dims$n
+        nparam <- .mvgls_bmm_nparam(object)
+        BIC <- -2*LL + log(n)*nparam
+
+        results <- list(LogLikelihood=LL, BIC=BIC, nparam=nparam, k=log(n))
+        class(results) <- c("bic.mvgls","bic")
+        return(results)
+    }
     
     # TODO generalize to mvXX functions
     if(object$method=="LL"){
@@ -64,7 +98,17 @@ AIC.mvgls <- function(object, ..., k = 2){
     # retrieve arguments
     args <- list(...)
     if(is.null(args[["REML"]])) args$forceREML <- TRUE else args$forceREML <- args$REML
+    .mvgls_corrshrink_loglik_guard(object)
     if(object$REML & args$forceREML==FALSE) LL <- .reml_to_ml(object) else LL <- object$logLik
+
+    if(.mvgls_is_corrshrink(object)){
+        nparam <- .mvgls_bmm_nparam(object)
+        AIC <- -2*LL + k*nparam
+
+        results <- list(LogLikelihood=LL, AIC=AIC, nparam=nparam, k=k)
+        class(results) <- c("aic.mvgls","aic")
+        return(results)
+    }
   
     if(object$method=="LL"){
         p <- object$dims$p
@@ -96,6 +140,24 @@ GIC.mvgls <- function(object, ...){
     args <- list(...)
     if(is.null(args[["eigSqm"]])) eigSqm <- TRUE else eigSqm <- args$eigSqm
     if(is.null(args[["REML"]])) args$forceREML <- TRUE else args$forceREML <- args$REML # force to true to follow what has been done in the first paper?
+
+    if(.mvgls_is_corrshrink(object)){
+        .mvgls_corrshrink_loglik_guard(object)
+        if(!is.null(args[["eigSqm"]]) && !isTRUE(args$eigSqm)) warning("The 'eigSqm' argument is ignored for corr-shrink BMM fits")
+        
+        LL <- object$logLik
+        n <- object$dims$n
+        p <- object$dims$p
+        bias_cov <- if(is.null(object$df.free_cov)) NA_real_ else object$df.free_cov
+        beta_df <- if(is.null(object$df.free_beta)) 0 else object$df.free_beta
+        mod.par <- if(is.null(object$df.free_model)) 0 else object$df.free_model
+        bias <- if(is.null(object$df.free)) bias_cov + beta_df + mod.par else object$df.free
+        GIC <- -2*LL + 2*bias
+        
+        results <- list(LogLikelihood=LL, GIC=GIC, p=p, n=n, bias=bias, bias_cov=bias_cov, args=args)
+        class(results) <- c("gic.mvgls","gic")
+        return(results)
+    }
      
     method <- object$method
     penalty <- object$penalty
@@ -236,6 +298,52 @@ EIC.mvgls <- function(object, nboot=100L, nbcores=1L, ...){
     
     # retrieve arguments
     args <- list(...)
+    if(.mvgls_is_corrshrink(object)){
+        .mvgls_corrshrink_loglik_guard(object)
+        if(!is.null(args[["eigSqm"]])) warning("The 'eigSqm' argument is ignored for corr-shrink BMM fits")
+        if(!is.null(args[["REML"]])) warning("The 'REML' argument is ignored for corr-shrink BMM fits")
+        if(is.null(args[["restricted"]])) restricted <- FALSE else restricted <- args$restricted
+        
+        llik <- .mvgls_corrshrink_loglik(object$variables$Y, object=object)
+        if(!is.finite(llik)) stop("The corr-shrink BMM likelihood could not be evaluated for the empirical fit")
+        bias <- .parallel_mapply(function(i){
+            tryCatch({
+                Yp <- simulate(object, nsim=1)
+                objectBoot <- .mvgls_corrshrink_refit(object, Yp, start=object$opt$par)
+                
+                ll1 <- .mvgls_corrshrink_loglik(objectBoot$variables$Y, object=objectBoot)
+                if(!is.finite(ll1)) stop("The bootstrap corr-shrink fit produced a non-finite log-likelihood")
+                
+                if(restricted){
+                    ll2 <- .mvgls_corrshrink_loglik(Yp, object=object, coefficients=objectBoot$coefficients)
+                    ll4 <- .mvgls_corrshrink_loglik(object$variables$Y, object=object, coefficients=object$coefficients,
+                        sigma_object=objectBoot)
+                }else{
+                    ll2 <- .mvgls_corrshrink_loglik(Yp, object=object, coefficients=object$coefficients)
+                    ll4 <- .mvgls_corrshrink_loglik(object$variables$Y, object=object, coefficients=objectBoot$coefficients,
+                        sigma_object=objectBoot)
+                }
+                if(!is.finite(ll2) || !is.finite(ll4)) stop("Cross-evaluated corr-shrink log-likelihood was non-finite")
+                
+                (ll1 - ll2) + (llik - ll4)
+            }, error=function(e){
+                NA_real_
+            })
+        }, 1:nboot, mc.cores = getOption("mc.cores", nbcores))
+        bias <- as.numeric(bias)
+        if(sum(is.na(bias)) > 0L) warning("There were multiple issues/aborted estimations in the bootstrapped samples")
+        bias <- bias[!is.na(bias)]
+        nboot_eff <- length(bias)
+        if(nboot_eff == 0L) stop("All corr-shrink EIC bootstrap replicates failed")
+        
+        pboot <- mean(bias)
+        EIC <- -2*llik + 2*pboot
+        se <- if(nboot_eff > 1L) sd(bias)/sqrt(nboot_eff) else 0
+        
+        results <- list(EIC=EIC, bias=bias, LogLikelihood=llik, se=se, p=object$dims$p, n=object$dims$n)
+        class(results) <- c("eic.mvgls","eic")
+        return(results)
+    }
     if(is.null(args[["eigSqm"]])) eigSqm <- TRUE else eigSqm <- args$eigSqm
     if(is.null(args[["restricted"]])) restricted <- FALSE else restricted <- args$restricted
     if(is.null(args[["REML"]])) args$forceREML <- FALSE else args$forceREML <- args$REML
@@ -565,6 +673,9 @@ fitted.mvgls <- function(object, ...){
 # ------------------------------------------------------------------------- #
 residuals.mvgls <- function(object, type=c("response","normalized"), ...){
     type <- match.arg(type)[1]
+    if(.mvgls_is_corrshrink(object) && type=="normalized"){
+        stop("normalized residuals are not implemented for corr-shrink BMM fits")
+    }
     if(type=="response"){
         residuals <- object$residuals
     }else{
@@ -581,6 +692,15 @@ residuals.mvgls <- function(object, type=c("response","normalized"), ...){
 vcov.mvgls <- function(object, ...){
     args <- list(...)
     if(is.null(args[["type"]])) type <- "coef" else type <- args$type
+    
+    if(.mvgls_is_corrshrink(object)){
+        switch(type,
+        "covariance"={return(object$sigma$Pinv)},
+        "precision"={return(object$sigma$P)},
+        "coef"={
+            stop("coefficient covariance is not implemented for corr-shrink BMM fits")
+        })
+    }
     
     switch(type,
     "covariance"={return(object$sigma$Pinv)}, # inverse of the precision matrix
@@ -612,6 +732,11 @@ coef.mvgls <- function(object, ...){
 # S3 method from "stats" package                                            #
 # ------------------------------------------------------------------------- #
 logLik.mvgls<-function(object,...){
+    
+    if(.mvgls_is_corrshrink(object)){
+        .mvgls_corrshrink_loglik_guard(object)
+        return(object$logLik)
+    }
     
     if(object$method=="LL" | object$method=="EmpBayes"){
         LL = object$logLik # it's already the LL returned
@@ -757,6 +882,20 @@ summary.mvgls <- function(object, ...){
     
     # loocv or LL
     meth <- ifelse(object$REML, "REML", "ML")
+
+    if(.mvgls_is_corrshrink(object)){
+        .mvgls_corrshrink_loglik_guard(object)
+        LL <- object$logLik
+        nparam <- .mvgls_bmm_nparam(object)
+        AIC <- -2*LL + 2*nparam
+        GIC <- -2*LL + 2*nparam
+        results.fit <- data.frame("AIC"=AIC, "GIC"=GIC, "logLik"=LL, row.names = " ")
+        
+        object$results.fit <- results.fit
+        object$GLS <- if(inherits(object,"mvols")) FALSE else TRUE
+        class(object) <- c("summary.mvgls","mvgls")
+        return(object)
+    }
     
     if(object$method=="LL"){
         LL = object$logLik
@@ -1108,6 +1247,9 @@ plot.mvgls <- function(x, term, ..., fitted=FALSE, residuals=FALSE){
 predict.mvgls <- function(object, newdata, ...){
     
     args <- list(...)
+    if(.mvgls_is_corrshrink(object)){
+        stop("predict() is not implemented for corr-shrink BMM fits")
+    }
     # if "tree" is provided
     if(!is.null(args[["tree"]])){
         if(!inherits(args$tree, "phylo")) stop("the provided tree is not of class \"phylo\" ") else tree <- args$tree
@@ -1260,6 +1402,9 @@ ancestral.mvgls <- function(object, ...){
         estim(tree = args$tree, data = args$data, object = object, asr=TRUE)
         
     }else if(inherits(object,"mvgls")){
+        if(.mvgls_is_corrshrink(object)){
+            stop("ancestral state estimation is not implemented for corr-shrink BMM fits")
+        }
         
         # If regression, must provide a regressor for the ancestral (nodes) states
         # check if newdata is provided
@@ -1310,4 +1455,3 @@ ancestral.mvgls <- function(object, ...){
     }
     
 }
-
