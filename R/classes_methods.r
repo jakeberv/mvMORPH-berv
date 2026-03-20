@@ -1447,6 +1447,61 @@ coef.mvgls <- function(object, ...){
     return(coeffs)
 }
 
+.mvgls_oum_coefficient_blocks <- function(object){
+    coeffs <- coef(object)
+    if(!identical(object$model, "OUM")){
+        return(list(combined=coeffs, regime_optima=NULL, regression_effects=NULL))
+    }
+
+    regime_names <- colnames(object$variables$regimes)
+    if(is.null(regime_names) || !length(regime_names)){
+        return(list(combined=coeffs, regime_optima=coeffs, regression_effects=NULL))
+    }
+
+    regime_idx <- match(regime_names, rownames(coeffs), nomatch=0L)
+    regime_idx <- regime_idx[regime_idx > 0L]
+    if(!length(regime_idx)){
+        return(list(combined=coeffs, regime_optima=coeffs, regression_effects=NULL))
+    }
+
+    regression_idx <- setdiff(seq_len(nrow(coeffs)), regime_idx)
+
+    list(
+        combined=coeffs,
+        regime_optima=coeffs[regime_idx, , drop=FALSE],
+        regression_effects=if(length(regression_idx)) coeffs[regression_idx, , drop=FALSE] else NULL
+    )
+}
+
+.mvgls_print_coefficient_matrix <- function(coeffs, digits, heading="Coefficients:"){
+    if(is.null(coeffs) || nrow(coeffs) == 0L) return(invisible(NULL))
+
+    if(ncol(coeffs) < 10L){
+        cat(heading, "\n", sep="")
+        print.default(format(coeffs, digits = digits), print.gap = 2L, quote = FALSE)
+    } else {
+        cat(sub(":$", "", heading), " (truncated):\n", sep="")
+        coefHead <- coeffs[, 1:10, drop=FALSE]
+        print(coefHead, digits = digits, quote = FALSE)
+        cat("Use \"coef\" to display all the coefficients\n")
+    }
+    cat("\n")
+    invisible(NULL)
+}
+
+.mvgls_print_coefficients <- function(object, digits){
+    coef_blocks <- .mvgls_oum_coefficient_blocks(object)
+    if(identical(object$model, "OUM") && !is.null(coef_blocks$regime_optima)){
+        .mvgls_print_coefficient_matrix(coef_blocks$regime_optima, digits, heading="Regime optima (theta):")
+        if(!is.null(coef_blocks$regression_effects)){
+            .mvgls_print_coefficient_matrix(coef_blocks$regression_effects, digits, heading="Regression effects (beta):")
+        }
+    }else{
+        .mvgls_print_coefficient_matrix(coef_blocks$combined, digits, heading="Coefficients:")
+    }
+    invisible(NULL)
+}
+
 # ------------------------------------------------------------------------- #
 # confint.mvgls                                                             #
 # options: object, parm, level, method, ...                                 #
@@ -1562,16 +1617,7 @@ print.mvgls <- function(x, digits = max(3L, getOption("digits") - 3L), ...){
     cat("for",x$dims$n,"observations","\n\n")
     
     # coefficients of the linear model
-    if(ncol(coef(x))<10) {
-        cat("Coefficients:\n")
-        print.default(format(coef(x), digits = digits),
-        print.gap = 2L, quote = FALSE)
-    } else {
-        cat("Coefficients (truncated):\n")
-        coefHead<-coef(x)[,1:10,drop=FALSE]
-        print(coefHead, digits = digits, quote = FALSE)
-        cat("Use \"coef\" to display all the coefficients\n")}
-    cat("\n")
+    .mvgls_print_coefficients(x, digits)
     invisible(x)
 }
 
@@ -1629,16 +1675,7 @@ print.summary.mvgls <- function(x, digits = max(3, getOption("digits") - 3), ...
     cat("for",x$dims$n,"observations","\n\n")
     
     # coefficients of the linear model
-    if(ncol(coef(x))<10) {
-        cat("Coefficients:\n")
-        print.default(format(coef(x), digits = digits),
-        print.gap = 2L, quote = FALSE)
-    } else {
-        cat("Coefficients (truncated):\n")
-        coefHead<-coef(x)[,1:10,drop=FALSE]
-        print(coefHead, digits = digits, quote = FALSE)
-        cat("Use \"coef\" to display all the coefficients\n")}
-    cat("\n")
+    .mvgls_print_coefficients(x, digits)
     invisible(x)
 }
 
