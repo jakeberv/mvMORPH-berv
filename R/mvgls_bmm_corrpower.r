@@ -162,7 +162,7 @@
     rel_scales <- pmax(scale_guess[-reference_index] / ref_scale, .Machine$double.eps)
     c(
         sigma_start,
-        sqrt(rel_scales),
+        log(rel_scales),
         rep(log(1), k - 1L)
     )
 }
@@ -179,6 +179,44 @@
         corr_power_idx=corr_power_idx,
         free_regime_names=free_regime_names
     )
+}
+
+.mvgls_bmm_corrpower_regularization <- function(){
+    lambda_scale <- getOption("mvMORPH.corrpower.lambda_scale", 0.05)
+    lambda_corr_power <- getOption("mvMORPH.corrpower.lambda_corr_power", 0.05)
+    lambda_scale <- suppressWarnings(as.numeric(lambda_scale[1]))
+    lambda_corr_power <- suppressWarnings(as.numeric(lambda_corr_power[1]))
+    if(!is.finite(lambda_scale) || lambda_scale < 0) lambda_scale <- 0.05
+    if(!is.finite(lambda_corr_power) || lambda_corr_power < 0) lambda_corr_power <- 0.05
+    list(
+        lambda_scale=lambda_scale,
+        lambda_corr_power=lambda_corr_power
+    )
+}
+
+.mvgls_bmm_corrpower_regularization_from_object <- function(object){
+    diag_info <- object$diagnostics$corrpower
+    lambda_scale <- diag_info$regularization_scale
+    lambda_corr_power <- diag_info$regularization_corr_power
+    if(is.null(lambda_scale) || !is.finite(lambda_scale)) lambda_scale <- 0
+    if(is.null(lambda_corr_power) || !is.finite(lambda_corr_power)) lambda_corr_power <- 0
+    list(
+        lambda_scale=lambda_scale,
+        lambda_corr_power=lambda_corr_power
+    )
+}
+
+.mvgls_bmm_corrpower_penalty <- function(par, p, regime_names, reference_index=1L,
+                                         regularization=.mvgls_bmm_corrpower_regularization()){
+    blocks <- .mvgls_bmm_corrpower_parameter_blocks(p, regime_names, reference_index=reference_index)
+    penalty <- 0
+    if(length(blocks$scale_idx) && regularization$lambda_scale > 0){
+        penalty <- penalty + regularization$lambda_scale * sum(par[blocks$scale_idx]^2)
+    }
+    if(length(blocks$corr_power_idx) && regularization$lambda_corr_power > 0){
+        penalty <- penalty + regularization$lambda_corr_power * sum(par[blocks$corr_power_idx]^2)
+    }
+    penalty
 }
 
 .mvgls_bmm_corrpower_start_pool <- function(base_start, p, regime_names, reference_index=1L){
@@ -207,7 +245,7 @@
     for(scale_multiplier in scale_multipliers){
         for(corr_power_seed in corr_power_seeds){
             start_vec <- base_start
-            start_vec[blocks$scale_idx] <- start_vec[blocks$scale_idx] * sqrt(scale_multiplier)
+            start_vec[blocks$scale_idx] <- start_vec[blocks$scale_idx] + log(scale_multiplier)
             start_vec[blocks$corr_power_idx] <- rep(log(corr_power_seed), length(blocks$corr_power_idx))
             starts[[counter]] <- start_vec
             counter <- counter + 1L
@@ -226,7 +264,7 @@
     scale <- rep(1, k)
     corr_power <- rep(1, k)
     if(length(blocks$scale_idx)){
-        scale[-reference_index] <- theta_scale^2
+        scale[-reference_index] <- exp(theta_scale)
         corr_power[-reference_index] <- exp(theta_corr_power)
     }
     names(scale) <- regime_names
@@ -297,20 +335,32 @@
     )
 }
 
-.mvgls_bmm_corrpower_fit_once <- function(start_par, objective, optimization, X, Y, regime_cov, reference_index=1L, hessian=FALSE){
+.mvgls_bmm_corrpower_fit_once <- function(start_par, objective, optimization, X, Y, regime_cov,
+                                         reference_index=1L, hessian=FALSE, regularization=.mvgls_bmm_corrpower_regularization()){
     opt <- try(optim(
         par=start_par,
         fn=objective,
         method=optimization,
         hessian=isTRUE(hessian)
     ), silent=TRUE)
+    regime_names <- names(regime_cov)
+    p <- ncol(Y)
     fit <- if(inherits(opt, "try-error")) NULL else .mvgls_bmm_corrpower_fit_components(opt$par, X=X, Y=Y, regime_cov=regime_cov, reference_index=reference_index)
+    penalty_value <- if(is.null(fit)) Inf else .mvgls_bmm_corrpower_penalty(
+        if(inherits(opt, "try-error")) start_par else opt$par,
+        p=p,
+        regime_names=regime_names,
+        reference_index=reference_index,
+        regularization=regularization
+    )
     max_scale <- if(is.null(fit)) Inf else max(fit$scale)
     max_corr_power <- if(is.null(fit)) Inf else max(fit$corr_power)
     list(
         opt=if(inherits(opt, "try-error")) NULL else opt,
         fit=fit,
         nloglik=if(is.null(fit) || !is.finite(fit$nloglik)) Inf else fit$nloglik,
+        objective_value=if(is.null(fit) || !is.finite(fit$nloglik) || !is.finite(penalty_value)) Inf else fit$nloglik + penalty_value,
+        penalty_value=penalty_value,
         max_scale=max_scale,
         max_corr_power=max_corr_power,
         par_norm=if(inherits(opt, "try-error")) Inf else sqrt(sum(opt$par^2))
@@ -327,7 +377,7 @@
         !is.null(x$opt) && identical(x$opt$convergence, 0L)
     }, logical(1))]
     finite_idx <- if(length(converged_idx)) converged_idx else good_idx
-    finite_scores <- vapply(candidates[finite_idx], function(x) x$nloglik, numeric(1))
+    finite_scores <- vapply(candidates[finite_idx], function(x) x$objective_value, numeric(1))
     best_value <- min(finite_scores)
     tie_idx <- finite_idx[finite_scores <= best_value + tol]
     if(length(tie_idx) == 1L) return(tie_idx)
@@ -383,6 +433,7 @@
     profile_rows <- vector("list", length(grid))
     current_par <- object$opt$par
     free_idx <- setdiff(seq_along(current_par), target_idx)
+    regularization <- .mvgls_bmm_corrpower_regularization_from_object(object)
     for(i in seq_along(grid)){
         opt <- optim(
             par=current_par[free_idx],
@@ -390,17 +441,23 @@
                 par_full <- current_par
                 par_full[free_idx] <- free_par
                 if(param == "scale"){
-                    par_full[target_idx] <- sqrt(grid[i])
+                    par_full[target_idx] <- log(grid[i])
                 }else{
                     par_full[target_idx] <- log(grid[i])
                 }
-                objective_full(par_full)
+                objective_full(par_full) + .mvgls_bmm_corrpower_penalty(
+                    par_full,
+                    p=p,
+                    regime_names=regime_names,
+                    reference_index=reference_index,
+                    regularization=regularization
+                )
             },
             method=optimization
         )
         current_par[free_idx] <- opt$par
         if(param == "scale"){
-            current_par[target_idx] <- sqrt(grid[i])
+            current_par[target_idx] <- log(grid[i])
         }else{
             current_par[target_idx] <- log(grid[i])
         }
@@ -463,7 +520,7 @@
         variables=variables,
         dims=dims,
         fitted=fit$fitted,
-        logLik=-fit$opt$value,
+        logLik=-fit$nloglik,
         method=method,
         model="BMM",
         reference_regime=reference_regime,
@@ -521,13 +578,20 @@
     regime_cov <- .mvgls_bmm_corrshrink_regimes(tree)
     reference <- .mvgls_bmm_corrshrink_reference(names(regime_cov), bmm_reference=bmm_reference)
     reference_index <- reference$reference_index
+    regularization <- .mvgls_bmm_corrpower_regularization()
     base_start <- if(is.null(start)) .mvgls_bmm_corrpower_start(tree, Y, X, reference_index=reference_index) else start
+    regime_names <- names(regime_cov)
     objective <- function(par){
         fit <- .mvgls_bmm_corrpower_fit_components(par, X=X, Y=Y, regime_cov=regime_cov, reference_index=reference_index)
         if(is.null(fit) || !is.finite(fit$nloglik)) return(1e25)
-        fit$nloglik
+        fit$nloglik + .mvgls_bmm_corrpower_penalty(
+            par,
+            p=ncol(Y),
+            regime_names=regime_names,
+            reference_index=reference_index,
+            regularization=regularization
+        )
     }
-    regime_names <- names(regime_cov)
     start_pool <- if(is.null(start)) {
         .mvgls_bmm_corrpower_start_pool(base_start, p=ncol(Y), regime_names=regime_names, reference_index=reference_index)
     }else{
@@ -551,6 +615,7 @@
             Y=Y,
             regime_cov=regime_cov,
             reference_index=reference_index,
+            regularization=regularization,
             hessian=FALSE
         )
     })
@@ -566,7 +631,14 @@
     )
     fit_polish <- .mvgls_bmm_corrpower_fit_components(opt_polish$par, X=X, Y=Y, regime_cov=regime_cov, reference_index=reference_index)
     if(!is.null(fit_polish) && is.finite(fit_polish$nloglik) &&
-       (is.null(fit) || !is.finite(fit$nloglik) || fit_polish$nloglik <= fit$nloglik + 1e-8)){
+       (is.null(fit) || !is.finite(fit$nloglik) ||
+        (fit_polish$nloglik + .mvgls_bmm_corrpower_penalty(
+            opt_polish$par,
+            p=ncol(Y),
+            regime_names=regime_names,
+            reference_index=reference_index,
+            regularization=regularization
+        )) <= (fit$nloglik + selected$penalty_value + 1e-8))){
         opt <- opt_polish
         fit <- fit_polish
     }
@@ -574,10 +646,14 @@
         warning("The experimental corr-power BMM optimizer reported convergence code ", opt$convergence)
     }
     if(is.null(fit) || !is.finite(fit$nloglik)) stop("Optimization failed for the experimental corr-power BMM fit")
+    opt$penalized_value <- opt$value
+    opt$gaussian_nloglik <- fit$nloglik
     fit$opt <- opt
     start_table <- start_pool$start_table
     start_table$convergence <- vapply(candidates, function(x) if(is.null(x$opt)) NA_integer_ else x$opt$convergence, integer(1))
     start_table$nloglik <- vapply(candidates, function(x) x$nloglik, numeric(1))
+    start_table$objective_value <- vapply(candidates, function(x) x$objective_value, numeric(1))
+    start_table$penalty_value <- vapply(candidates, function(x) x$penalty_value, numeric(1))
     start_table$max_scale <- vapply(candidates, function(x) x$max_scale, numeric(1))
     start_table$max_corr_power <- vapply(candidates, function(x) x$max_corr_power, numeric(1))
     start_table$selected <- start_table$start_id == selected_idx
@@ -590,6 +666,8 @@
         boundary_corr_power=any(non_reference_power < 0.05 | non_reference_power > 3),
         pathological_scale=any(fit$scale > 20),
         pathological_corr_power=any(non_reference_power > 4),
+        regularization_scale=regularization$lambda_scale,
+        regularization_corr_power=regularization$lambda_corr_power,
         max_scale=max(fit$scale),
         max_corr_power=max(fit$corr_power),
         corr_power_max=max(fit$corr_power)

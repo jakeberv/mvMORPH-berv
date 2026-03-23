@@ -104,7 +104,7 @@ check_start_table <- function(fit, expected_nstarts, expected_source = NULL) {
   st <- diag$start_table
   assert_true(is.data.frame(st), "diagnostics$corrpower$start_table must be a data.frame")
   assert_true(nrow(st) == expected_nstarts, sprintf("expected %d starts, got %d", expected_nstarts, nrow(st)))
-  required <- c("start_id", "source", "scale_multiplier", "corr_power_seed", "convergence", "nloglik", "max_scale", "selected")
+  required <- c("start_id", "source", "scale_multiplier", "corr_power_seed", "convergence", "nloglik", "objective_value", "penalty_value", "max_scale", "selected")
   assert_true(all(required %in% names(st)), "start_table is missing one or more required columns")
   assert_true(sum(as.logical(st$selected)) == 1L, "exactly one start should be marked selected")
   if (!is.null(expected_source)) {
@@ -133,15 +133,16 @@ assert_true(any(grepl("nstarts", summary_out, fixed = TRUE)), "summary output di
 assert_true(any(grepl("selected", summary_out, fixed = TRUE)), "summary output did not report the selected start")
 assert_true(any(grepl("corr_power", summary_out, fixed = TRUE)), "summary output did not report corr-power terminology")
 
-best_nloglik <- min(easy_diag$start_table$nloglik[is.finite(easy_diag$start_table$nloglik)])
+best_objective <- min(easy_diag$start_table$objective_value[is.finite(easy_diag$start_table$objective_value)])
 assert_true(
-  abs(as.numeric(easy_fit$logLik) - (-best_nloglik)) < 1e-6,
-  "selected fit logLik does not match the best finite candidate in start_table"
+  abs(easy_diag$start_table$objective_value[easy_diag$start_table$selected] - best_objective) < 1e-6,
+  "selected fit objective does not match the best finite candidate in start_table"
 )
 assert_true(
   identical(easy_diag$selected_start_id, easy_diag$start_table$start_id[easy_diag$start_table$selected]),
   "selected_start_id does not match the selected row in start_table"
 )
+assert_true(is.finite(as.numeric(easy_fit$logLik)), "selected corr-power fit should report a finite Gaussian log-likelihood")
 
 alt_ref_fit_name <- fit_corrpower(Y ~ 1, data = list(Y = easy_Y), tree = easy_tree, bmm.reference = "B")
 alt_ref_fit_index <- fit_corrpower(Y ~ 1, data = list(Y = easy_Y), tree = easy_tree, bmm.reference = 2L)

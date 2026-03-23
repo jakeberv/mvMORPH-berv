@@ -827,8 +827,10 @@ corrpower_diagnostics.mvgls <- function(object, level=0.95, nboot=100L, nbcores=
     acceptance <- if(!is.null(anchor_sensitivity)) anchor_sensitivity$acceptance else NULL
     if(is.null(acceptance)) acceptance <- list()
     acceptance$selected <- diag_info$selected_start_id %||% NA_integer_
-    acceptance$boundary_corr_power <- diag_info$boundary_corr_strength %||% NA
+    acceptance$boundary_corr_power <- diag_info$boundary_corr_power %||% NA
     acceptance$pathological_scale <- diag_info$pathological_scale %||% NA
+    acceptance$regularization_scale <- diag_info$regularization_scale %||% NA
+    acceptance$regularization_corr_power <- diag_info$regularization_corr_power %||% NA
 
     results <- list(
         parameter_summary=parameter_summary,
