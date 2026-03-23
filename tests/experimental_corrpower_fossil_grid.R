@@ -7,11 +7,16 @@ file_arg <- sub("^--file=", "", args[grep("^--file=", args)])
 if (!length(file_arg)) stop("This script must be run with Rscript.", call. = FALSE)
 repo_root <- normalizePath(file.path(dirname(file_arg), ".."))
 
-if (!requireNamespace("pkgload", quietly = TRUE)) {
-  stop("pkgload is required to run this harness.", call. = FALSE)
-}
+use_installed <- identical(toupper(Sys.getenv("MV_MORPH_USE_INSTALLED", "FALSE")), "TRUE")
 
-pkgload::load_all(repo_root, quiet = TRUE)
+if (use_installed) {
+  suppressPackageStartupMessages(library(mvMORPH))
+} else {
+  if (!requireNamespace("pkgload", quietly = TRUE)) {
+    stop("pkgload is required to run this harness.", call. = FALSE)
+  }
+  pkgload::load_all(repo_root, quiet = TRUE)
+}
 
 assert_true <- function(cond, msg) {
   if (!isTRUE(cond)) stop(msg, call. = FALSE)
@@ -28,6 +33,30 @@ expect_error <- function(expr, pattern = NULL) {
     )
   }
   invisible(TRUE)
+}
+
+env_flag <- function(name, default = FALSE) {
+  val <- toupper(Sys.getenv(name, if (default) "TRUE" else "FALSE"))
+  identical(val, "TRUE")
+}
+
+env_int <- function(name, default = NA_integer_) {
+  val <- Sys.getenv(name, "")
+  if (!nzchar(val)) return(default)
+  as.integer(val)
+}
+
+write_outputs <- function(results_df) {
+  save_csv <- Sys.getenv("CORRPOWER_FOSSIL_GRID_SAVE_CSV", "")
+  save_rds <- Sys.getenv("CORRPOWER_FOSSIL_GRID_SAVE_RDS", "")
+  if (nzchar(save_csv)) {
+    dir.create(dirname(save_csv), recursive = TRUE, showWarnings = FALSE)
+    utils::write.csv(results_df, save_csv, row.names = FALSE)
+  }
+  if (nzchar(save_rds)) {
+    dir.create(dirname(save_rds), recursive = TRUE, showWarnings = FALSE)
+    saveRDS(results_df, save_rds)
+  }
 }
 
 apply_corrpower <- function(base_sigma, scale, corr_power) {
@@ -102,8 +131,9 @@ full_grid <- expand.grid(
   relation = c("weaker", "stronger"),
   stringsAsFactors = FALSE
 )
+full_grid$scenario_id <- seq_len(nrow(full_grid))
 
-scenario_grid <- if (identical(toupper(Sys.getenv("CORRPOWER_FOSSIL_GRID_FULL", "FALSE")), "TRUE")) {
+scenario_grid <- if (env_flag("CORRPOWER_FOSSIL_GRID_FULL", FALSE)) {
   full_grid
 } else {
   subset(
@@ -116,14 +146,39 @@ scenario_grid <- if (identical(toupper(Sys.getenv("CORRPOWER_FOSSIL_GRID_FULL", 
   )
 }
 
+chunk_total <- env_int("CORRPOWER_FOSSIL_GRID_CHUNK_TOTAL", 1L)
+chunk_index <- env_int("CORRPOWER_FOSSIL_GRID_CHUNK_INDEX", 1L)
+if (is.na(chunk_total) || chunk_total < 1L) stop("CORRPOWER_FOSSIL_GRID_CHUNK_TOTAL must be >= 1", call. = FALSE)
+if (is.na(chunk_index) || chunk_index < 1L || chunk_index > chunk_total) {
+  stop("CORRPOWER_FOSSIL_GRID_CHUNK_INDEX must be between 1 and CORRPOWER_FOSSIL_GRID_CHUNK_TOTAL", call. = FALSE)
+}
+if (chunk_total > 1L) {
+  keep <- ((seq_len(nrow(scenario_grid)) - 1L) %% chunk_total) == (chunk_index - 1L)
+  scenario_grid <- scenario_grid[keep, , drop = FALSE]
+}
+if (!nrow(scenario_grid)) {
+  results_df <- full_grid[0, c("n_extant", "p", "fossil_fraction", "fossil_depth", "mapped_fraction", "base_signal", "relation"), drop = FALSE]
+  results_df$scenario <- character(0)
+  results_df$logLik_full <- numeric(0)
+  results_df$logLik_extant <- numeric(0)
+  results_df$full_pathological_scale <- logical(0)
+  results_df$extant_pathological_scale <- logical(0)
+  results_df$full_boundary <- logical(0)
+  results_df$extant_boundary <- logical(0)
+  write_outputs(results_df)
+  cat("No scenarios assigned to this corr-power fossil-grid chunk\n")
+  quit(save = "no", status = 0L)
+}
+
 results <- list()
 counter <- 1L
 for (i in seq_len(nrow(scenario_grid))) {
   sc <- scenario_grid[i, ]
+  sid <- sc$scenario_id[[1]]
   n_fossil <- max(1L, round(sc$n_extant * sc$fossil_fraction))
-  tr <- make_fossil_tree(20260380 + i, n_extant = sc$n_extant, n_fossil = n_fossil, fossil_depth = sc$fossil_depth)
-  tree_full <- build_simmap(tr$full, seed = 20260400 + i, states_per_regime = c(A = round(sc$n_extant * 0.6), B = round(sc$n_extant * 0.4)))
-  tree_extant <- build_simmap(tr$extant, seed = 20260420 + i, states_per_regime = c(A = round(length(tr$extant$tip.label) * 0.6), B = max(2L, round(length(tr$extant$tip.label) * 0.4))))
+  tr <- make_fossil_tree(20260380 + sid, n_extant = sc$n_extant, n_fossil = n_fossil, fossil_depth = sc$fossil_depth)
+  tree_full <- build_simmap(tr$full, seed = 20260400 + sid, states_per_regime = c(A = round(sc$n_extant * 0.6), B = round(sc$n_extant * 0.4)))
+  tree_extant <- build_simmap(tr$extant, seed = 20260420 + sid, states_per_regime = c(A = round(length(tr$extant$tip.label) * 0.6), B = max(2L, round(length(tr$extant$tip.label) * 0.4))))
   base_sigma <- if (sc$p == 2L) {
     if (sc$base_signal < 0.5) matrix(c(1.3, 0.08, 0.08, 1.0), 2, 2) else matrix(c(1.3, 0.55, 0.55, 1.0), 2, 2)
   } else {
@@ -142,11 +197,12 @@ for (i in seq_len(nrow(scenario_grid))) {
     corr_b <- if (sc$base_signal < 0.5) 1.30 else 1.50
   }
   sigma_fossil <- list(A = base_sigma, B = apply_corrpower(base_sigma, scale = scale_b, corr_power = corr_b))
-  Y_full <- simulate_response(tree_full, sigma_fossil, seed = 20260500 + i)
+  Y_full <- simulate_response(tree_full, sigma_fossil, seed = 20260500 + sid)
   Y_extant <- Y_full[tree_extant$tip.label, , drop = FALSE]
   fit_full <- fit_corrpower(Y ~ 1, data = list(Y = Y_full), tree = tree_full)
   fit_extant <- fit_corrpower(Y ~ 1, data = list(Y = Y_extant), tree = tree_extant)
   results[[counter]] <- data.frame(
+    scenario_id = sid,
     scenario = paste(sc, collapse = "|"),
     n_extant = sc$n_extant,
     p = sc$p,
@@ -167,6 +223,7 @@ for (i in seq_len(nrow(scenario_grid))) {
 }
 
 results_df <- do.call(rbind, results)
+write_outputs(results_df)
 print(results_df)
 
 cat("\nFossil vs extant summary\n")
