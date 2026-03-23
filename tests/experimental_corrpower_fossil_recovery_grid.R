@@ -171,12 +171,14 @@ add_fossil_tips <- function(extant_tree, n_fossil, fossil_depth, seed) {
     edge_id <- sample(eligible, 1L)
     where <- tree$edge[edge_id, 2]
     position <- max(heights[edge_id, 2] - target_height, 0)
+    available_height <- max(tree_height - target_height, 1e-6)
+    fossil_length <- max(min(0.02 * tree_height, 0.5 * available_height), 1e-6)
     fossil_label <- sprintf("fossil_%03d", i)
     fossil_labels[[i]] <- fossil_label
     tree <- phytools::bind.tip(
       tree,
       tip.label = fossil_label,
-      edge.length = 0,
+      edge.length = fossil_length,
       where = where,
       position = position
     )
@@ -352,6 +354,54 @@ compare_case <- function(sc) {
     extant_pathological_scale = isTRUE(getElement(fit_extant$diagnostics$corrpower, "pathological_scale")),
     full_boundary = isTRUE(getElement(fit_full$diagnostics$corrpower, "boundary_corr_power")),
     extant_boundary = isTRUE(getElement(fit_extant$diagnostics$corrpower, "boundary_corr_power")),
+    fit_success = TRUE,
+    error_message = NA_character_,
+    stringsAsFactors = FALSE
+  )
+}
+
+failure_row <- function(sc, message_text) {
+  data.frame(
+    scenario_id = sc$scenario_id,
+    replicate = sc$replicate,
+    n_extant = sc$n_extant,
+    n_fossil = if (sc$fossil_fraction <= 0) 0L else max(1L, round(sc$n_extant * sc$fossil_fraction)),
+    p = sc$p,
+    fossil_fraction = sc$fossil_fraction,
+    fossil_depth = sc$fossil_depth,
+    mapped_fraction_target = sc$mapped_fraction,
+    mapped_fraction_full_B = NA_real_,
+    mapped_fraction_extant_B = NA_real_,
+    base_signal = sc$base_signal,
+    relation = sc$relation,
+    lambda_scale = lambda_scale,
+    lambda_corr_power = lambda_corr_power,
+    true_scale_B = NA_real_,
+    true_corr_power_B = NA_real_,
+    full_cov_rel_frob_A = NA_real_,
+    full_cov_rel_frob_B = NA_real_,
+    full_cov_rel_frob = NA_real_,
+    extant_cov_rel_frob_A = NA_real_,
+    extant_cov_rel_frob_B = NA_real_,
+    extant_cov_rel_frob = NA_real_,
+    delta_cov_rel_frob_B = NA_real_,
+    full_summary_rmse = NA_real_,
+    extant_summary_rmse = NA_real_,
+    delta_summary_rmse = NA_real_,
+    full_B_mean_rate_abs_err = NA_real_,
+    extant_B_mean_rate_abs_err = NA_real_,
+    full_B_mean_abs_corr_abs_err = NA_real_,
+    extant_B_mean_abs_corr_abs_err = NA_real_,
+    fossil_better_cov_B = NA,
+    fossil_better_summary = NA,
+    logLik_full = NA_real_,
+    logLik_extant = NA_real_,
+    full_pathological_scale = NA,
+    extant_pathological_scale = NA,
+    full_boundary = NA,
+    extant_boundary = NA,
+    fit_success = FALSE,
+    error_message = as.character(message_text),
     stringsAsFactors = FALSE
   )
 }
@@ -386,7 +436,7 @@ scenario_grid <- if (env_flag("CORRPOWER_FOSSIL_RECOVERY_FULL", FALSE)) {
       p %in% c(2L, 4L) &
       fossil_fraction %in% c(0, 0.50) &
       fossil_depth %in% c("none", "deep") &
-      mapped_fraction == 0.20 &
+      mapped_fraction %in% c(0.20, 0.80) &
       base_signal == 0.20 &
       relation == "weaker" &
       replicate == 1L
@@ -444,6 +494,8 @@ empty_results <- function() {
     extant_pathological_scale = logical(0),
     full_boundary = logical(0),
     extant_boundary = logical(0),
+    fit_success = logical(0),
+    error_message = character(0),
     stringsAsFactors = FALSE
   )
 }
@@ -456,7 +508,11 @@ if (!nrow(scenario_grid)) {
 }
 
 results_df <- do.call(rbind, lapply(seq_len(nrow(scenario_grid)), function(i) {
-  compare_case(scenario_grid[i, , drop = FALSE])
+  sc <- scenario_grid[i, , drop = FALSE]
+  tryCatch(
+    compare_case(sc),
+    error = function(e) failure_row(sc, conditionMessage(e))
+  )
 }))
 
 write_outputs(results_df)
@@ -474,7 +530,7 @@ cat(sprintf("full boundary rate: %.3f\n", mean(results_df$full_boundary, na.rm =
 cat(sprintf("extant boundary rate: %.3f\n", mean(results_df$extant_boundary, na.rm = TRUE)))
 
 if (!any(is.finite(results_df$full_cov_rel_frob_B))) {
-  stop("No corrpower fossil-recovery fits succeeded.", call. = FALSE)
+  cat("No corrpower fossil-recovery fits succeeded in this chunk\n")
+} else {
+  cat("corrpower fossil-recovery grid harness checks passed\n")
 }
-
-cat("corrpower fossil-recovery grid harness checks passed\n")

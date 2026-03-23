@@ -137,6 +137,29 @@
     regime_names <- colnames(tree$mapped.edge)
     k <- length(regime_names)
     sigma_start <- startParamSigma(p, "cholesky", tree, Y)
+    safe_scale_guess <- function(tree_local, Y_local, X_local){
+        residuals <- try(.rate_guess(
+            tree_local,
+            Y_local[tree_local$tip.label, , drop=FALSE],
+            X_local[tree_local$tip.label, , drop=FALSE]
+        ), silent=TRUE)
+        if(inherits(residuals, "try-error") || any(!is.finite(residuals))){
+            coef_guess <- try(pseudoinverse(X_local[tree_local$tip.label, , drop=FALSE]) %*% Y_local[tree_local$tip.label, , drop=FALSE], silent=TRUE)
+            if(inherits(coef_guess, "try-error") || any(!is.finite(coef_guess))){
+                residuals <- scale(Y_local[tree_local$tip.label, , drop=FALSE], center=TRUE, scale=FALSE)
+            }else{
+                residuals <- Y_local[tree_local$tip.label, , drop=FALSE] - X_local[tree_local$tip.label, , drop=FALSE] %*% coef_guess
+            }
+        }
+        vars <- suppressWarnings(apply(residuals, 2, stats::var, na.rm=TRUE))
+        vars <- vars[is.finite(vars) & vars > 0]
+        if(!length(vars)){
+            vars <- diag(stats::cov(Y_local[tree_local$tip.label, , drop=FALSE], use="pairwise.complete.obs"))
+            vars <- vars[is.finite(vars) & vars > 0]
+        }
+        if(!length(vars)) return(1)
+        sqrt(mean(vars))
+    }
     tip_values <- seq_len(Ntip(tree))
     index_tips <- tree$edge[, 2] %in% tip_values
     maps <- vapply(tree$maps[index_tips], function(x) names(x[length(x)]), character(1))
@@ -150,11 +173,7 @@
                 sp_to_remove <- sp_to_remove[-sample(length(sp_to_remove), size=1)]
             }
             tree_red <- if(length(sp_to_remove) > 0) drop.tip(tree, sp_to_remove) else tree
-            if(Ntip(tree_red) <= 1){
-                sqrt(mean(apply(.rate_guess(tree, Y[tree$tip.label, , drop=FALSE], X[tree$tip.label, , drop=FALSE]), 2, var)))
-            }else{
-                sqrt(mean(apply(.rate_guess(tree_red, Y[tree_red$tip.label, , drop=FALSE], X[tree_red$tip.label, , drop=FALSE]), 2, var)))
-            }
+            if(Ntip(tree_red) <= 1) safe_scale_guess(tree, Y, X) else safe_scale_guess(tree_red, Y, X)
         }, numeric(1))
         scale_guess <- pmax(scale_guess^2, .Machine$double.eps)
     }
