@@ -1,10 +1,10 @@
 # OUM Simulation Summary Report
 
-Generated on 2026-03-24 14:54 EDT
+Generated on 2026-03-24 18:48 EDT
 
 ## Provenance
 
-- Figures and summaries for the focused theta-recovery study are generated directly from local pulled CSVs in `archon-pulls/tg18/tests/`.
+- Figures and summaries for the focused theta-recovery study and the later null-pathology study are generated directly from local pulled CSVs in `archon-pulls/tg18/tests/`.
 - Earlier Archon campaigns reused the same remote workspace, so some of their raw CSV outputs were overwritten later.
 - For those earlier campaigns, the report uses the quantitative results recorded during the session and labels them as reconstructed summaries.
 
@@ -15,6 +15,7 @@ Generated on 2026-03-24 14:54 EDT
 - Head-to-head `BMM` vs `OUM` comparisons under `GIC` are asymmetric: `BMM` is recovered strongly, while `OUM` is much easier to miss, especially when candidate sets include shared models.
 - Direct `OU` vs `OUM` comparison is better calibrated than `BMM` vs `OUM`, but still weak in mixed or high-dimensional small-sample settings.
 - The strongest new result is that `theta` recovery is materially better than model selection alone suggests. In favorable settings, regime optima can be estimated well even before `OUM` wins every model comparison.
+- A final null-only pathology study sharpened the main warning: once `p` approaches `n`, false `OUM` support can become very large across all methods, and unpenalized `LL` starts to break down numerically before it fails outright.
 
 ## 1. OUM With Covariates: What Worked
 
@@ -76,10 +77,28 @@ Generated on 2026-03-24 14:54 EDT
 
 ![Selection versus recovery by design](figures/theta_recovery_design_heatmap.png)
 
+## 7. Small-n / High-p Null Pathology Study (Raw CSVs Pulled Locally)
+
+- This final study fixed `n = 60` under shared-OU truth and asked what happens as trait dimension increases through `p = 24, 36, 48, 64`, while varying regime count, regime balance, covariate type, covariate strength, alpha, and fitting method.
+- At `p = 24`, false `OUM` selection was still moderate: LL 11.1%, EmpBayes 24.9%, LOOCV 31.2%.
+- By `p = 48`, the methods had separated sharply: LL jumped to 89.3%, while EmpBayes and LOOCV were at 51.4% and 61.1%.
+- At `p = 64`, unpenalized `LL` was no longer interpretable: OUM fit rate was 0.0%, both-model GIC availability was 0.0%, and the issue rate was 100.0%. The dominant warning was `There are more variables than observations`, which is exactly the unsupported regime we wanted to isolate.
+- Imbalanced painted regimes made the null problem worse for every method. False `OUM` selection rose from 38.0% to 51.1% for `LL`, from 35.2% to 56.1% for `EmpBayes`, and from 45.3% to 60.7% for `LOOCV`.
+- The covariate itself was not the main culprit. Across methods, changing the true covariate effect from `0` to `0.05` barely moved the null selection rate.
+
+![False OUM support in the null-pathology study](figures/null_pathology_false_selection.png)
+
+- The key mechanistic clue is that the `LL` pathology at `p = 48` was accompanied by a strong blow-up in covariance conditioning and fitted alpha. Mean `alpha_hat` under OUM rose from about 1.21 at `p = 24` to 2.45 at `p = 48`, while mean OUM covariance condition number rose from about 103.8 to 2644.3.
+- In contrast, the penalized methods stayed numerically much more stable. At `p = 48`, mean OUM covariance condition number was only about 11.2 for `EmpBayes` and 13.1 for `LOOCV`, with fitted alpha staying close to 1.
+- So the small-n/high-p null study changed the interpretation of `LL`: it is still the safest default in moderate dimensions, but once `p` gets close to `n`, the unpenalized OUM fit can become a numerical pathology rather than a conservative baseline.
+
+![Mechanism of the null-pathology breakdown](figures/null_pathology_mechanism.png)
+
 ## Practical Takeaways
 
 - The new OUM regression path is software-correct enough to use for size-adjusted multivariate analyses with painted regimes.
-- For model selection, `LL` is the safest default. `LOOCV` and `EmpBayes` are more permissive near the null.
+- For model selection, `LL` is the safest default when trait dimension is moderate relative to sample size. It should not be treated as a safe baseline in the truly high-dimensional `p \approx n` regime.
+- In small-n / high-p settings, penalized methods remain numerically usable, but their null false-positive rates can still become large. Use them with caution and prefer simulation calibration when the decision matters.
 - Direct `OU` vs `OUM` comparison is more interpretable than `BMM` vs `OUM` when the scientific question is about optimum shifts.
 - Failure to select `OUM` is weak evidence against optimum shifts unless the dataset is in a favorable regime.
 - The favorable regime looks like: moderate-to-high alpha, sufficiently separated regime optima, at least about 120 taxa, and preferably not extreme small-n/high-p settings.

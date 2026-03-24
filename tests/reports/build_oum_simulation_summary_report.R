@@ -9,6 +9,7 @@ suppressPackageStartupMessages({
 })
 
 `%||%` <- function(x, y) if (is.null(x)) y else x
+has_text <- function(x) !is.na(x) & nzchar(x)
 
 script_arg <- grep("^--file=", commandArgs(trailingOnly = FALSE), value = TRUE)
 script_path <- if (length(script_arg)) {
@@ -45,13 +46,18 @@ theta_boundary_path <- file.path(
   repo_root,
   "archon-pulls", "tg18", "tests", "experimental_oum_theta_recovery_boundary.csv"
 )
+pathology_results_path <- file.path(
+  repo_root,
+  "archon-pulls", "tg18", "tests", "experimental_oum_null_pathology_results.csv"
+)
 
-if (!file.exists(theta_summary_path) || !file.exists(theta_boundary_path)) {
-  stop("Theta recovery CSVs were not found under archon-pulls/tg18/tests.", call. = FALSE)
+if (!file.exists(theta_summary_path) || !file.exists(theta_boundary_path) || !file.exists(pathology_results_path)) {
+  stop("Required simulation CSVs were not found under archon-pulls/tg18/tests.", call. = FALSE)
 }
 
 theta_summary <- read.csv(theta_summary_path, stringsAsFactors = FALSE)
 theta_boundary <- read.csv(theta_boundary_path, stringsAsFactors = FALSE)
+pathology_results <- read.csv(pathology_results_path, stringsAsFactors = FALSE)
 
 null_df <- theta_summary %>% filter(phase == "focused_null")
 recovery_df <- theta_summary %>% filter(phase == "theta_recovery")
@@ -248,12 +254,82 @@ plot_theta_design <- ggplot(
   ) +
   theme_report()
 
+pathology_selection <- pathology_results %>%
+  group_by(method, p, n_regimes, regime_balance) %>%
+  summarise(select_oum_rate = mean(winner == "OUM", na.rm = TRUE), .groups = "drop")
+
+pathology_selection_plot <- pathology_selection %>%
+  filter(is.finite(select_oum_rate))
+
+plot_pathology_selection <- ggplot(
+  pathology_selection_plot,
+  aes(x = p, y = select_oum_rate, color = method)
+) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 1.8) +
+  facet_grid(n_regimes ~ regime_balance) +
+  scale_x_continuous(breaks = sort(unique(pathology_selection$p))) +
+  scale_y_continuous(labels = label_percent(accuracy = 1), limits = c(0, 1)) +
+  scale_color_manual(values = c("LL" = "#2F6C8F", "EmpBayes" = "#D97A32", "LOOCV" = "#7B8D42")) +
+  labs(
+    title = "Small-n / High-p Null Designs Produce Rapidly Rising False OUM Support",
+    subtitle = "Shared-OU truth with n = 60; imbalance and extra regimes make the problem worse",
+    x = "Trait dimension (p)",
+    y = "OUM selected under null",
+    color = "Method"
+  ) +
+  theme_report()
+
+pathology_mechanism <- pathology_results %>%
+  filter(!(method == "LL" & p == 64)) %>%
+  group_by(method, p) %>%
+  summarise(
+    alpha_hat = mean(alpha_hat_oum, na.rm = TRUE),
+    sigma_kappa = mean(sigma_kappa_oum, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+pathology_mechanism_long <- rbind(
+  data.frame(
+    method = pathology_mechanism$method,
+    p = pathology_mechanism$p,
+    metric = "Mean OUM alpha_hat",
+    value = pathology_mechanism$alpha_hat
+  ),
+  data.frame(
+    method = pathology_mechanism$method,
+    p = pathology_mechanism$p,
+    metric = "Mean OUM covariance kappa (log10)",
+    value = log10(pathology_mechanism$sigma_kappa)
+  )
+)
+
+plot_pathology_mechanism <- ggplot(
+  pathology_mechanism_long,
+  aes(x = p, y = value, color = method)
+) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 1.8) +
+  facet_wrap(~ metric, scales = "free_y", nrow = 1) +
+  scale_x_continuous(breaks = sort(unique(pathology_mechanism$p))) +
+  scale_color_manual(values = c("LL" = "#2F6C8F", "EmpBayes" = "#D97A32", "LOOCV" = "#7B8D42")) +
+  labs(
+    title = "The LL Pathology Tracks Alpha Inflation and Covariance Ill-Conditioning",
+    subtitle = "At p = 48, unpenalized OUM fits become numerically unstable well before outright failure at p = 64",
+    x = "Trait dimension (p)",
+    y = NULL,
+    color = "Method"
+  ) +
+  theme_report()
+
 fig_covariate <- save_plot(plot_covariate_null, "covariate_null_selection_rates.png", width = 9, height = 5.5)
 fig_head_to_head <- save_plot(plot_bmm_oum_head_to_head, "bmm_oum_head_to_head.png", width = 8.5, height = 5.2)
 fig_theta_null <- save_plot(plot_theta_null_heat, "theta_null_heatmap.png", width = 10.5, height = 5.4)
 fig_theta_select <- save_plot(plot_theta_select_signal, "theta_selection_vs_signal.png", width = 10.5, height = 5.4)
 fig_theta_recovery <- save_plot(plot_theta_recovery_signal, "theta_recovery_vs_signal.png", width = 10.5, height = 5.4)
 fig_theta_design <- save_plot(plot_theta_design, "theta_recovery_design_heatmap.png", width = 10.5, height = 5.4)
+fig_pathology_selection <- save_plot(plot_pathology_selection, "null_pathology_false_selection.png", width = 11, height = 7)
+fig_pathology_mechanism <- save_plot(plot_pathology_mechanism, "null_pathology_mechanism.png", width = 10.5, height = 5.4)
 
 null_overall <- mean(null_df$select_oum_rate)
 null_by_n <- null_df %>% group_by(n_tips) %>% summarise(rate = mean(select_oum_rate), .groups = "drop")
@@ -288,6 +364,50 @@ recovery_by_p <- recovery_df %>% group_by(p) %>% summarise(
   .groups = "drop"
 )
 
+path_by_method <- pathology_results %>%
+  group_by(method) %>%
+  summarise(
+    select_oum_rate = mean(winner == "OUM", na.rm = TRUE),
+    oum_fit_rate = mean(oum_fit_success),
+    both_gic_rate = mean(both_gic_available),
+    alpha_hat = mean(alpha_hat_oum, na.rm = TRUE),
+    tuning = mean(tuning_oum, na.rm = TRUE),
+    sigma_kappa = mean(sigma_kappa_oum, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+path_by_method_p <- pathology_results %>%
+  group_by(method, p) %>%
+  summarise(
+    select_oum_rate = mean(winner == "OUM", na.rm = TRUE),
+    alpha_hat = mean(alpha_hat_oum, na.rm = TRUE),
+    tuning = mean(tuning_oum, na.rm = TRUE),
+    sigma_kappa = mean(sigma_kappa_oum, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+path_by_method_balance <- pathology_results %>%
+  group_by(method, regime_balance) %>%
+  summarise(select_oum_rate = mean(winner == "OUM", na.rm = TRUE), .groups = "drop")
+
+path_ll_p64 <- pathology_results %>%
+  filter(method == "LL", p == 64) %>%
+  summarise(
+    oum_fit_rate = mean(oum_fit_success),
+    both_gic_rate = mean(both_gic_available),
+    issue_rate = mean(has_issue),
+    .groups = "drop"
+  )
+
+path_covariate_effect <- pathology_results %>%
+  group_by(method, covariate_effect) %>%
+  summarise(select_oum_rate = mean(winner == "OUM", na.rm = TRUE), .groups = "drop")
+
+path_issue_top <- sort(table(c(
+  pathology_results$ou_messages[has_text(pathology_results$ou_messages)],
+  pathology_results$oum_messages[has_text(pathology_results$oum_messages)]
+)), decreasing = TRUE)
+
 boundary_text <- theta_boundary %>%
   group_by(n_tips, p, alpha) %>%
   summarise(
@@ -317,7 +437,7 @@ report_lines <- c(
   "",
   "## Provenance",
   "",
-  "- Figures and summaries for the focused theta-recovery study are generated directly from local pulled CSVs in `archon-pulls/tg18/tests/`.",
+  "- Figures and summaries for the focused theta-recovery study and the later null-pathology study are generated directly from local pulled CSVs in `archon-pulls/tg18/tests/`.",
   "- Earlier Archon campaigns reused the same remote workspace, so some of their raw CSV outputs were overwritten later.",
   "- For those earlier campaigns, the report uses the quantitative results recorded during the session and labels them as reconstructed summaries.",
   "",
@@ -328,6 +448,7 @@ report_lines <- c(
   "- Head-to-head `BMM` vs `OUM` comparisons under `GIC` are asymmetric: `BMM` is recovered strongly, while `OUM` is much easier to miss, especially when candidate sets include shared models.",
   "- Direct `OU` vs `OUM` comparison is better calibrated than `BMM` vs `OUM`, but still weak in mixed or high-dimensional small-sample settings.",
   "- The strongest new result is that `theta` recovery is materially better than model selection alone suggests. In favorable settings, regime optima can be estimated well even before `OUM` wins every model comparison.",
+  "- A final null-only pathology study sharpened the main warning: once `p` approaches `n`, false `OUM` support can become very large across all methods, and unpenalized `LL` starts to break down numerically before it fails outright.",
   "",
   "## 1. OUM With Covariates: What Worked",
   "",
@@ -482,10 +603,76 @@ report_lines <- c(
   "",
   paste0("![Selection versus recovery by design](", basename(dirname(fig_theta_design)), "/", basename(fig_theta_design), ")"),
   "",
+  "## 7. Small-n / High-p Null Pathology Study (Raw CSVs Pulled Locally)",
+  "",
+  "- This final study fixed `n = 60` under shared-OU truth and asked what happens as trait dimension increases through `p = 24, 36, 48, 64`, while varying regime count, regime balance, covariate type, covariate strength, alpha, and fitting method.",
+  paste0(
+    "- At `p = 24`, false `OUM` selection was still moderate: ",
+    "LL ", fmt_pct(path_by_method_p$select_oum_rate[path_by_method_p$method == "LL" & path_by_method_p$p == 24]),
+    ", EmpBayes ", fmt_pct(path_by_method_p$select_oum_rate[path_by_method_p$method == "EmpBayes" & path_by_method_p$p == 24]),
+    ", LOOCV ", fmt_pct(path_by_method_p$select_oum_rate[path_by_method_p$method == "LOOCV" & path_by_method_p$p == 24]), "."
+  ),
+  paste0(
+    "- By `p = 48`, the methods had separated sharply: ",
+    "LL jumped to ", fmt_pct(path_by_method_p$select_oum_rate[path_by_method_p$method == "LL" & path_by_method_p$p == 48]),
+    ", while EmpBayes and LOOCV were at ",
+    fmt_pct(path_by_method_p$select_oum_rate[path_by_method_p$method == "EmpBayes" & path_by_method_p$p == 48]), " and ",
+    fmt_pct(path_by_method_p$select_oum_rate[path_by_method_p$method == "LOOCV" & path_by_method_p$p == 48]), "."
+  ),
+  paste0(
+    "- At `p = 64`, unpenalized `LL` was no longer interpretable: OUM fit rate was ",
+    fmt_pct(path_ll_p64$oum_fit_rate), ", both-model GIC availability was ",
+    fmt_pct(path_ll_p64$both_gic_rate), ", and the issue rate was ",
+    fmt_pct(path_ll_p64$issue_rate),
+    ". The dominant warning was `There are more variables than observations`, which is exactly the unsupported regime we wanted to isolate."
+  ),
+  paste0(
+    "- Imbalanced painted regimes made the null problem worse for every method. False `OUM` selection rose from ",
+    fmt_pct(path_by_method_balance$select_oum_rate[path_by_method_balance$method == "LL" & path_by_method_balance$regime_balance == "balanced"]),
+    " to ",
+    fmt_pct(path_by_method_balance$select_oum_rate[path_by_method_balance$method == "LL" & path_by_method_balance$regime_balance == "imbalanced"]),
+    " for `LL`, from ",
+    fmt_pct(path_by_method_balance$select_oum_rate[path_by_method_balance$method == "EmpBayes" & path_by_method_balance$regime_balance == "balanced"]),
+    " to ",
+    fmt_pct(path_by_method_balance$select_oum_rate[path_by_method_balance$method == "EmpBayes" & path_by_method_balance$regime_balance == "imbalanced"]),
+    " for `EmpBayes`, and from ",
+    fmt_pct(path_by_method_balance$select_oum_rate[path_by_method_balance$method == "LOOCV" & path_by_method_balance$regime_balance == "balanced"]),
+    " to ",
+    fmt_pct(path_by_method_balance$select_oum_rate[path_by_method_balance$method == "LOOCV" & path_by_method_balance$regime_balance == "imbalanced"]),
+    " for `LOOCV`."
+  ),
+  paste0(
+    "- The covariate itself was not the main culprit. Across methods, changing the true covariate effect from `0` to `0.05` barely moved the null selection rate."
+  ),
+  "",
+  paste0("![False OUM support in the null-pathology study](", basename(dirname(fig_pathology_selection)), "/", basename(fig_pathology_selection), ")"),
+  "",
+  paste0(
+    "- The key mechanistic clue is that the `LL` pathology at `p = 48` was accompanied by a strong blow-up in covariance conditioning and fitted alpha. Mean `alpha_hat` under OUM rose from about ",
+    fmt_num(path_by_method_p$alpha_hat[path_by_method_p$method == "LL" & path_by_method_p$p == 24], 2),
+    " at `p = 24` to ",
+    fmt_num(path_by_method_p$alpha_hat[path_by_method_p$method == "LL" & path_by_method_p$p == 48], 2),
+    " at `p = 48`, while mean OUM covariance condition number rose from about ",
+    fmt_num(path_by_method_p$sigma_kappa[path_by_method_p$method == "LL" & path_by_method_p$p == 24], 1),
+    " to ",
+    fmt_num(path_by_method_p$sigma_kappa[path_by_method_p$method == "LL" & path_by_method_p$p == 48], 1), "."
+  ),
+  paste0(
+    "- In contrast, the penalized methods stayed numerically much more stable. At `p = 48`, mean OUM covariance condition number was only about ",
+    fmt_num(path_by_method_p$sigma_kappa[path_by_method_p$method == "EmpBayes" & path_by_method_p$p == 48], 1),
+    " for `EmpBayes` and ",
+    fmt_num(path_by_method_p$sigma_kappa[path_by_method_p$method == "LOOCV" & path_by_method_p$p == 48], 1),
+    " for `LOOCV`, with fitted alpha staying close to 1."
+  ),
+  "- So the small-n/high-p null study changed the interpretation of `LL`: it is still the safest default in moderate dimensions, but once `p` gets close to `n`, the unpenalized OUM fit can become a numerical pathology rather than a conservative baseline.",
+  "",
+  paste0("![Mechanism of the null-pathology breakdown](", basename(dirname(fig_pathology_mechanism)), "/", basename(fig_pathology_mechanism), ")"),
+  "",
   "## Practical Takeaways",
   "",
   "- The new OUM regression path is software-correct enough to use for size-adjusted multivariate analyses with painted regimes.",
-  "- For model selection, `LL` is the safest default. `LOOCV` and `EmpBayes` are more permissive near the null.",
+  "- For model selection, `LL` is the safest default when trait dimension is moderate relative to sample size. It should not be treated as a safe baseline in the truly high-dimensional `p \\approx n` regime.",
+  "- In small-n / high-p settings, penalized methods remain numerically usable, but their null false-positive rates can still become large. Use them with caution and prefer simulation calibration when the decision matters.",
   "- Direct `OU` vs `OUM` comparison is more interpretable than `BMM` vs `OUM` when the scientific question is about optimum shifts.",
   "- Failure to select `OUM` is weak evidence against optimum shifts unless the dataset is in a favorable regime.",
   "- The favorable regime looks like: moderate-to-high alpha, sufficiently separated regime optima, at least about 120 taxa, and preferably not extreme small-n/high-p settings.",
