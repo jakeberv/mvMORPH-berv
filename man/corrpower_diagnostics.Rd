@@ -6,7 +6,7 @@
 Diagnostics For Experimental Corr-Power mvgls Fits
 }
 \description{
-User-facing diagnostics for experimental \code{mvgls} fits with \code{model="BMM"} and \code{bmm.structure="corrpower"}. This is the correlation-power sibling of the earlier experimental corr-strength interface.
+User-facing diagnostics for experimental \code{mvgls} fits with \code{model="BMM"} and \code{bmm.structure="corrpower"}.
 }
 \usage{
 corrpower_diagnostics(object, ...)
@@ -86,7 +86,6 @@ The returned object has class \code{"corrpower_diagnostics"} and contains data.f
 \code{\link{mvgls}}
 \code{\link{EIC}}
 \code{\link{GIC}}
-\code{\link{corrstrength_diagnostics}}
 }
 \examples{
 \donttest{

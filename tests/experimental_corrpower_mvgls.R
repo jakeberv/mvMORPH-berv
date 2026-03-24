@@ -141,6 +141,20 @@ fit_corr_prop <- fit_corrpower(Y ~ 1, data = list(Y = Y_prop), tree = simmap)
 fit_corr_weak <- fit_corrpower(Y ~ 1, data = list(Y = Y_weak), tree = weak_simmap)
 fit_corr_strong <- fit_corrpower(Y ~ 1, data = list(Y = Y_strong), tree = simmap)
 
+expect_error(
+  mvgls(
+    Y ~ 1,
+    data = list(Y = Y_prop),
+    tree = simmap,
+    model = "BMM",
+    method = "LL",
+    REML = FALSE,
+    bmm.structure = "corrstrength",
+    echo = FALSE
+  ),
+  "Experimental bmm.structure=\"corrstrength\" has been retired on this branch; use bmm.structure=\"corrpower\""
+)
+
 assert_true(identical(fit_corr_prop$bmm.structure, "corrpower"), "corrpower fit did not mark the structure")
 assert_true(all(c("df.free", "df.free_cov", "df.free_beta", "df.free_model") %in% names(fit_corr_prop)),
   "corrpower fit is missing one or more df.free fields"
