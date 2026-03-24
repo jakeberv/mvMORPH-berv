@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>corrpower_simulation_report</title>
+  <style>
+    /* Default styles provided by pandoc.
+    ** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+    */
+    html {
+      color: #1a1a1a;
+      background-color: #fdfdfd;
+    }
+    body {
+      margin: 0 auto;
+      max-width: 36em;
+      padding-left: 50px;
+      padding-right: 50px;
+      padding-top: 50px;
+      padding-bottom: 50px;
+      hyphens: auto;
+      overflow-wrap: break-word;
+      text-rendering: optimizeLegibility;
+      font-kerning: normal;
+    }
+    @media (max-width: 600px) {
+      body {
+        font-size: 0.9em;
+        padding: 12px;
+      }
+      h1 {
+        font-size: 1.8em;
+      }
+    }
+    @media print {
+      html {
+        background-color: white;
+      }
+      body {
+        background-color: transparent;
+        color: black;
+        font-size: 12pt;
+      }
+      p, h2, h3 {
+        orphans: 3;
+        widows: 3;
+      }
+      h2, h3, h4 {
+        page-break-after: avoid;
+      }
+    }
+    p {
+      margin: 1em 0;
+    }
+    a {
+      color: #1a1a1a;
+    }
+    a:visited {
+      color: #1a1a1a;
+    }
+    img {
+      max-width: 100%;
+    }
+    svg {
+      height: auto;
+      max-width: 100%;
+    }
+    h1, h2, h3, h4, h5, h6 {
+      margin-top: 1.4em;
+    }
+    h5, h6 {
+      font-size: 1em;
+      font-style: italic;
+    }
+    h6 {
+      font-weight: normal;
+    }
+    ol, ul {
+      padding-left: 1.7em;
+      margin-top: 1em;
+    }
+    li > ol, li > ul {
+      margin-top: 0;
+    }
+    blockquote {
+      margin: 1em 0 1em 1.7em;
+      padding-left: 1em;
+      border-left: 2px solid #e6e6e6;
+      color: #606060;
+    }
+    code {
+      font-family: Menlo, Monaco, Consolas, 'Lucida Console', monospace;
+      font-size: 85%;
+      margin: 0;
+      hyphens: manual;
+    }
+    pre {
+      margin: 1em 0;
+      overflow: auto;
+    }
+    pre code {
+      padding: 0;
+      overflow: visible;
+      overflow-wrap: normal;
+    }
+    .sourceCode {
+     background-color: transparent;
+     overflow: visible;
+    }
+    hr {
+      border: none;
+      border-top: 1px solid #1a1a1a;
+      height: 1px;
+      margin: 1em 0;
+    }
+    table {
+      margin: 1em 0;
+      border-collapse: collapse;
+      width: 100%;
+      overflow-x: auto;
+      display: block;
+      font-variant-numeric: lining-nums tabular-nums;
+    }
+    table caption {
+      margin-bottom: 0.75em;
+    }
+    tbody {
+      margin-top: 0.5em;
+      border-top: 1px solid #1a1a1a;
+      border-bottom: 1px solid #1a1a1a;
+    }
+    th {
+      border-top: 1px solid #1a1a1a;
+      padding: 0.25em 0.5em 0.25em 0.5em;
+    }
+    td {
+      padding: 0.125em 0.5em 0.25em 0.5em;
+    }
+    header {
+      margin-bottom: 4em;
+      text-align: center;
+    }
+    #TOC li {
+      list-style: none;
+    }
+    #TOC ul {
+      padding-left: 1.3em;
+    }
+    #TOC > ul {
+      padding-left: 0;
+    }
+    #TOC a:not(:hover) {
+      text-decoration: none;
+    }
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+  </style>
+</head>
+<body>
+<h1 id="experimental-bmm-simulation-report">Experimental BMM Simulation
+Report</h1>
+<p>Date: 2026-03-24</p>
+<h2 id="executive-summary">Executive Summary</h2>
+<p>The simulation evidence now supports a clear working conclusion:</p>
+<ul>
+<li>The original <code>corrstrength</code> parameterization was
+scientifically promising but practically unstable, especially in
+higher-dimensional and weak-signal settings.</li>
+<li>The new <code>corrpower</code> parameterization improved robustness
+by reducing catastrophic failures.</li>
+<li>A mild stabilization pass on <code>corrpower</code> made it clearly
+better than <code>corrstrength</code> on the hard comparison set.</li>
+<li>With stabilized <code>corrpower</code>, adding fossil terminals
+improved recovery of the true regime covariance structure in about 70%
+of fossil scenarios and modestly reduced both pathological-scale fits
+and boundary behavior.</li>
+</ul>
+<p>At this point, the best-supported experimental option is stabilized
+<code>corrpower</code>, not <code>corrstrength</code>.</p>
+<h2 id="simulation-campaigns-covered">Simulation Campaigns Covered</h2>
+<p>This report synthesizes the main simulation campaigns run during
+development:</p>
+<table>
+<thead>
+<tr>
+<th>Campaign</th>
+<th>Scope</th>
+<th>Main purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Pilot extant-only <code>corrstrength</code> screen</td>
+<td>Local pilot screen, mainly <code>p = 2</code>, with attempts to
+expand to <code>p = 4</code></td>
+<td>Establish whether the new correlation-structure model was viable at
+all</td>
+</tr>
+<tr>
+<td><code>corrstrength</code> fossil benchmark</td>
+<td>384 scenarios, 3840 paired extant/fossil fits</td>
+<td>Test whether fossil terminals improve identifiability under
+<code>corrstrength</code></td>
+</tr>
+<tr>
+<td>Unstabilized <code>corrpower</code> vs <code>corrstrength</code>
+comparison</td>
+<td>160 hard-case runs</td>
+<td>Test whether <code>corrpower</code> is a better model family than
+<code>corrstrength</code></td>
+</tr>
+<tr>
+<td>Stabilized <code>corrpower</code> vs <code>corrstrength</code>
+comparison</td>
+<td>160 hard-case runs</td>
+<td>Test whether weak regularization materially improves
+<code>corrpower</code></td>
+</tr>
+<tr>
+<td>Stabilized <code>corrpower</code> fossil recovery grid</td>
+<td>6720 paired fits, 5760 fossil scenarios</td>
+<td>Test whether fossils improve truth recovery under the stabilized
+<code>corrpower</code> fitter</td>
+</tr>
+</tbody>
+</table>
+<h2 id="1-pilot-extant-only-corrstrength-screen">1. Pilot Extant-Only
+<code>corrstrength</code> Screen</h2>
+<p>The first extant-only <code>corrstrength</code> pilot established
+that the model was not obviously unusable, but it was already showing
+practical fragility.</p>
+<p>From the recorded local pilot summary:</p>
+<ul>
+<li>success rate: <code>1.000</code></li>
+<li>warning rate: <code>0.000</code></li>
+<li>convergence warning rate: <code>0.000</code></li>
+<li>median derived-regime covariance error: <code>0.300</code></li>
+<li>share with covariance error <code>&lt; 0.25</code>:
+<code>0.431</code></li>
+<li>pathological-scale flag rate: <code>0.139</code></li>
+</ul>
+<p>The important lesson was that the model could fit and recover some
+signal, but pathology remained common enough that it was not ready for
+broader use. Attempts to extend the screen into harder
+<code>p = 4</code> settings also bogged down or became unstable. That
+early result motivated a rethink of the parameterization rather than
+more feature work.</p>
+<h2 id="2-corrstrength-fossil-benchmark">2. <code>corrstrength</code>
+Fossil Benchmark</h2>
+<p>The first major fossil benchmark showed that fossils were helping,
+but not enough to rescue <code>corrstrength</code>.</p>
+<p>Summary from the archived analysis bundle:</p>
+<ul>
+<li>rows: <code>3840</code></li>
+<li>unique scenarios: <code>384</code></li>
+<li>extant success: <code>96.4%</code></li>
+<li>fossil success: <code>96.3%</code></li>
+<li>timeout rate: <code>3.6%</code></li>
+<li>fossils better on covariance: <code>60.4%</code></li>
+<li>fossils better on absolute correlation: <code>52.6%</code></li>
+<li>fossils better on mean rate: <code>55.2%</code></li>
+<li>median covariance error: <code>0.352 -&gt; 0.320</code> for
+extant-only to fossil+extant</li>
+<li>median covariance improvement: <code>0.024</code></li>
+<li>pathological-scale rate: <code>5.9% -&gt; 9.7%</code></li>
+<li>boundary rate: <code>52.9% -&gt; 46.8%</code></li>
+</ul>
+<p>Interpretation:</p>
+<ul>
+<li>Fossils were already improving covariance recovery on average.</li>
+<li>More fossils helped more.</li>
+<li>Weak-signal scenarios benefited more than strong-signal
+scenarios.</li>
+<li>But <code>corrstrength</code> still remained too unstable,
+especially in higher-dimensional settings (<code>p = 4</code> was the
+bad corner).</li>
+</ul>
+<p>This benchmark justified continuing to take fossils seriously, but it
+also showed that the model architecture itself still needed work.</p>
+<h2 id="3-unstabilized-corrpower-vs-corrstrength">3. Unstabilized
+<code>corrpower</code> vs <code>corrstrength</code></h2>
+<p>The next major question was whether <code>corrpower</code> was
+genuinely better than <code>corrstrength</code> in the hardest part of
+the design space.</p>
+<p>On the first targeted comparison set (<code>160</code> hard-case
+runs):</p>
+<ul>
+<li><code>corrpower</code> better on regime-<code>B</code> covariance
+recovery: <code>65.6%</code></li>
+<li><code>corrpower</code> better on regime-summary recovery:
+<code>64.4%</code></li>
+<li><code>corrpower</code> better on log-likelihood:
+<code>57.5%</code></li>
+<li>median regime-<code>B</code> covariance error:
+<ul>
+<li><code>corrpower</code>: <code>1.324861</code></li>
+<li><code>corrstrength</code>: <code>1.605179</code></li>
+</ul></li>
+<li>median regime-summary error:
+<ul>
+<li><code>corrpower</code>: <code>0.227341</code></li>
+<li><code>corrstrength</code>: <code>0.279938</code></li>
+</ul></li>
+<li>pathological rate:
+<ul>
+<li><code>corrpower</code>: <code>0.0%</code></li>
+<li><code>corrstrength</code>: <code>25.0%</code></li>
+</ul></li>
+<li>boundary rate:
+<ul>
+<li><code>corrpower</code>: <code>60.6%</code></li>
+<li><code>corrstrength</code>: <code>60.0%</code></li>
+</ul></li>
+</ul>
+<p>Clean subset, excluding pathological runs in either model:</p>
+<ul>
+<li><code>corrpower</code> covariance win rate: <code>54.2%</code></li>
+<li>median regime-<code>B</code> covariance error:
+<ul>
+<li><code>corrpower</code>: <code>1.212830</code></li>
+<li><code>corrstrength</code>: <code>1.206407</code></li>
+</ul></li>
+</ul>
+<p>Interpretation:</p>
+<ul>
+<li><code>corrpower</code> was clearly better at avoiding catastrophic
+failures.</li>
+<li>However, it was not yet a decisive scientific win once both models
+were behaving.</li>
+<li>The main remaining defect was still weak identifiability, showing up
+as high boundary behavior.</li>
+</ul>
+<h2 id="4-stabilized-corrpower-vs-corrstrength">4. Stabilized
+<code>corrpower</code> vs <code>corrstrength</code></h2>
+<p>The stabilization pass added two important changes to
+<code>corrpower</code>:</p>
+<ul>
+<li>optimize non-reference <code>scale</code> on a log scale rather than
+as a squared parameter</li>
+<li>add weak shrinkage toward <code>scale = 1</code> and
+<code>corr_power = 1</code></li>
+</ul>
+<p>On the same targeted hard-case comparison set (<code>160</code>
+runs), the stabilized <code>corrpower</code> model performed much
+better:</p>
+<ul>
+<li><code>corrpower</code> better on regime-<code>B</code> covariance
+recovery: <code>75.0%</code></li>
+<li><code>corrpower</code> better on regime-summary recovery:
+<code>81.9%</code></li>
+<li><code>corrpower</code> better on log-likelihood:
+<code>39.4%</code></li>
+<li>median regime-<code>B</code> covariance error:
+<ul>
+<li><code>corrpower</code>: <code>1.220909</code></li>
+<li><code>corrstrength</code>: <code>1.605179</code></li>
+</ul></li>
+<li>median regime-summary error:
+<ul>
+<li><code>corrpower</code>: <code>0.214712</code></li>
+<li><code>corrstrength</code>: <code>0.279938</code></li>
+</ul></li>
+<li>pathological rate:
+<ul>
+<li><code>corrpower</code>: <code>0.0%</code></li>
+<li><code>corrstrength</code>: <code>25.0%</code></li>
+</ul></li>
+<li>boundary rate:
+<ul>
+<li><code>corrpower</code>: <code>30.6%</code></li>
+<li><code>corrstrength</code>: <code>60.0%</code></li>
+</ul></li>
+</ul>
+<p>Clean subset:</p>
+<ul>
+<li><code>corrpower</code> covariance win rate: <code>66.7%</code></li>
+<li>median regime-<code>B</code> covariance error:
+<ul>
+<li><code>corrpower</code>: <code>1.144657</code></li>
+<li><code>corrstrength</code>: <code>1.206407</code></li>
+</ul></li>
+</ul>
+<p>Interpretation:</p>
+<ul>
+<li>The stabilization pass materially improved
+<code>corrpower</code>.</li>
+<li>The model no longer just avoided blowups; it also recovered the
+target better more often even when both models were otherwise
+well-behaved.</li>
+<li>The drop in unpenalized log-likelihood wins was expected and
+acceptable because the model was now trading a little fit for much
+better truth recovery and stability.</li>
+</ul>
+<p>This was the decisive result that made stabilized
+<code>corrpower</code> the preferred experimental option.</p>
+<h2 id="5-stabilized-corrpower-fossil-recovery-grid">5. Stabilized
+<code>corrpower</code> Fossil Recovery Grid</h2>
+<p>The final and most informative campaign asked the practical question:
+once the fitter is stabilized, do fossil terminals genuinely help
+recover the truth?</p>
+<p>The finished fossil-recovery campaign produced:</p>
+<ul>
+<li>total rows: <code>6720</code></li>
+<li>control rows (<code>fossil_fraction = 0</code>):
+<code>960</code></li>
+<li>actual fossil scenarios: <code>5760</code></li>
+<li>fit success overall: <code>100%</code></li>
+<li>fit success on fossil scenarios: <code>100%</code></li>
+</ul>
+<h3 id="overall-fossil-effect">Overall fossil effect</h3>
+<p>Across the fossil scenarios only:</p>
+<ul>
+<li>fossils better on regime-<code>B</code> covariance recovery:
+<code>70.5%</code></li>
+<li>fossils better on regime-summary recovery: <code>70.2%</code></li>
+<li>median regime-<code>B</code> covariance error:
+<ul>
+<li>fossil+extant: <code>0.179</code></li>
+<li>extant-only: <code>0.215</code></li>
+</ul></li>
+<li>median covariance improvement (<code>extant - fossil</code>):
+<code>0.029</code></li>
+<li>mean covariance improvement: <code>0.042</code></li>
+<li>median regime-summary RMSE:
+<ul>
+<li>fossil+extant: <code>0.120</code></li>
+<li>extant-only: <code>0.148</code></li>
+</ul></li>
+<li>median summary RMSE improvement: <code>0.022</code></li>
+<li>median regime-<code>B</code> mean-rate absolute error:
+<ul>
+<li>fossil+extant: <code>0.134</code></li>
+<li>extant-only: <code>0.163</code></li>
+</ul></li>
+<li>median regime-<code>B</code> mean absolute correlation error:
+<ul>
+<li>fossil+extant: <code>0.050</code></li>
+<li>extant-only: <code>0.057</code></li>
+</ul></li>
+<li>pathological-scale rate:
+<ul>
+<li>fossil+extant: <code>0.1%</code></li>
+<li>extant-only: <code>0.3%</code></li>
+</ul></li>
+<li>boundary rate:
+<ul>
+<li>fossil+extant: <code>15.9%</code></li>
+<li>extant-only: <code>18.7%</code></li>
+</ul></li>
+</ul>
+<p>Sanity check:</p>
+<ul>
+<li>the <code>fossil_fraction = 0</code> control rows showed essentially
+zero median difference between the “full” and extant-only fits</li>
+</ul>
+<p>That means the harness is behaving as intended and the fossil
+advantage is not an artifact of the bookkeeping.</p>
+<h3 id="effect-of-fossil-fraction">Effect of fossil fraction</h3>
+<p>More fossils helped more, very cleanly:</p>
+<table>
+<thead>
+<tr>
+<th>Fossil Fraction</th>
+<th style="text-align: right;">Fossils Better on Covariance</th>
+<th style="text-align: right;">Fossils Better on Summary</th>
+<th style="text-align: right;">Median Covariance Improvement</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>0.25</code></td>
+<td style="text-align: right;"><code>63.6%</code></td>
+<td style="text-align: right;"><code>63.7%</code></td>
+<td style="text-align: right;"><code>0.015</code></td>
+</tr>
+<tr>
+<td><code>0.50</code></td>
+<td style="text-align: right;"><code>71.4%</code></td>
+<td style="text-align: right;"><code>70.3%</code></td>
+<td style="text-align: right;"><code>0.031</code></td>
+</tr>
+<tr>
+<td><code>0.75</code></td>
+<td style="text-align: right;"><code>76.5%</code></td>
+<td style="text-align: right;"><code>76.6%</code></td>
+<td style="text-align: right;"><code>0.045</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="effect-of-fossil-depth">Effect of fossil depth</h3>
+<p>Depth mattered less than expected in the current design:</p>
+<table>
+<thead>
+<tr>
+<th>Fossil Depth</th>
+<th style="text-align: right;">Fossils Better on Covariance</th>
+<th style="text-align: right;">Fossils Better on Summary</th>
+<th style="text-align: right;">Median Covariance Improvement</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>deep</code></td>
+<td style="text-align: right;"><code>70.3%</code></td>
+<td style="text-align: right;"><code>71.3%</code></td>
+<td style="text-align: right;"><code>0.025</code></td>
+</tr>
+<tr>
+<td><code>shallow</code></td>
+<td style="text-align: right;"><code>70.7%</code></td>
+<td style="text-align: right;"><code>69.1%</code></td>
+<td style="text-align: right;"><code>0.033</code></td>
+</tr>
+</tbody>
+</table>
+<p>The current simulation design therefore supports a general fossil
+effect more strongly than a strong depth-specific effect.</p>
+<h3 id="effect-of-extant-sample-size">Effect of extant sample size</h3>
+<table>
+<thead>
+<tr>
+<th><code>n_extant</code></th>
+<th style="text-align: right;">Fossils Better on Covariance</th>
+<th style="text-align: right;">Median Covariance Improvement</th>
+<th style="text-align: right;">Full Boundary Rate</th>
+<th style="text-align: right;">Extant Boundary Rate</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>50</code></td>
+<td style="text-align: right;"><code>69.4%</code></td>
+<td style="text-align: right;"><code>0.043</code></td>
+<td style="text-align: right;"><code>20.8%</code></td>
+<td style="text-align: right;"><code>24.2%</code></td>
+</tr>
+<tr>
+<td><code>100</code></td>
+<td style="text-align: right;"><code>70.2%</code></td>
+<td style="text-align: right;"><code>0.029</code></td>
+<td style="text-align: right;"><code>15.7%</code></td>
+<td style="text-align: right;"><code>18.2%</code></td>
+</tr>
+<tr>
+<td><code>200</code></td>
+<td style="text-align: right;"><code>72.0%</code></td>
+<td style="text-align: right;"><code>0.023</code></td>
+<td style="text-align: right;"><code>11.4%</code></td>
+<td style="text-align: right;"><code>13.8%</code></td>
+</tr>
+</tbody>
+</table>
+<p>Interpretation:</p>
+<ul>
+<li>fossils remained useful at all three sample sizes</li>
+<li>absolute improvement was largest at smaller extant sample sizes</li>
+<li>as expected, the overall problem gets easier as
+<code>n_extant</code> increases</li>
+</ul>
+<h3 id="effect-of-dimensionality">Effect of dimensionality</h3>
+<table>
+<thead>
+<tr>
+<th>Traits (<code>p</code>)</th>
+<th style="text-align: right;">Fossils Better on Covariance</th>
+<th style="text-align: right;">Fossils Better on Summary</th>
+<th style="text-align: right;">Median Covariance Improvement</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>2</code></td>
+<td style="text-align: right;"><code>66.3%</code></td>
+<td style="text-align: right;"><code>70.0%</code></td>
+<td style="text-align: right;"><code>0.023</code></td>
+</tr>
+<tr>
+<td><code>4</code></td>
+<td style="text-align: right;"><code>74.7%</code></td>
+<td style="text-align: right;"><code>70.3%</code></td>
+<td style="text-align: right;"><code>0.033</code></td>
+</tr>
+</tbody>
+</table>
+<p>This is encouraging. The covariance benefit from fossils was actually
+larger in the harder <code>p = 4</code> setting.</p>
+<h3 id="other-design-factors">Other design factors</h3>
+<p>The fossil advantage was stable across the remaining axes:</p>
+<ul>
+<li>base signal <code>0.2</code>: fossils better on covariance
+<code>70.3%</code></li>
+<li>base signal <code>0.5</code>: fossils better on covariance
+<code>70.7%</code></li>
+<li>mapped branch fraction target <code>0.2</code>: fossils better on
+covariance <code>67.4%</code></li>
+<li>mapped branch fraction target <code>0.8</code>: fossils better on
+covariance <code>73.6%</code></li>
+<li><code>relation = stronger</code>: fossils better on covariance
+<code>70.7%</code></li>
+<li><code>relation = weaker</code>: fossils better on covariance
+<code>70.3%</code></li>
+</ul>
+<p>The low-signal runs still had more boundary behavior overall, but
+fossils helped there too.</p>
+<h2 id="cross-campaign-synthesis">Cross-Campaign Synthesis</h2>
+<p>Taken together, the simulation record tells a coherent story:</p>
+<ol type="1">
+<li>The original <code>corrstrength</code> model captured a real signal
+but remained too unstable to trust broadly.</li>
+<li>Fossils already helped under <code>corrstrength</code>, which argued
+that the identifiability problem was not just conceptual; it was partly
+a data-geometry problem.</li>
+<li>The <code>corrpower</code> reparameterization reduced catastrophic
+failures but was initially still too boundary-prone.</li>
+<li>A mild stabilization pass turned <code>corrpower</code> into a
+clearly better model than <code>corrstrength</code> on the hard
+comparison set.</li>
+<li>Under stabilized <code>corrpower</code>, fossil terminals provide
+consistent and meaningful gains in recovery of the true regime
+covariance structure.</li>
+</ol>
+<p>The strongest global conclusion is therefore:</p>
+<blockquote>
+<p>Stabilized <code>corrpower</code> plus fossil terminals is the first
+version of this experimental BMM correlation model that looks
+scientifically promising rather than merely technically interesting.</p>
+</blockquote>
+<h2 id="practical-recommendations">Practical Recommendations</h2>
+<h3 id="recommended-current-experimental-default">Recommended current
+experimental default</h3>
+<p>If the experimental BMM correlation structure is to be used going
+forward, it should be:</p>
+<ul>
+<li>model family: <code>corrpower</code></li>
+<li>fitter: stabilized <code>corrpower</code></li>
+<li>interpretive target: regime covariance matrices and derived regime
+summaries, not raw <code>corr_power</code> alone</li>
+</ul>
+<h3 id="what-to-do-next">What to do next</h3>
+<p>The best next step is not a new model family yet. It is to
+consolidate and communicate what now works:</p>
+<ol type="1">
+<li>Treat stabilized <code>corrpower</code> as the preferred
+experimental option.</li>
+<li>Preserve the full simulation record and attach this report to the
+branch.</li>
+<li>Produce a compact figure set from the fossil-recovery grid.</li>
+<li>If more simulation work is needed, make it targeted:
+<ul>
+<li>test where the fossil benefit saturates</li>
+<li>test robustness to incomplete fossil sampling</li>
+<li>test whether fossil placement can be optimized</li>
+</ul></li>
+</ol>
+<h3 id="what-not-to-overstate">What not to overstate</h3>
+<ul>
+<li><code>corrpower</code> is improved, not finished.</li>
+<li>Boundary behavior is still present, even though it is much better
+than before.</li>
+<li>Raw likelihood is not the right score when comparing fossil+extant
+fits to extant-only fits, because those are different datasets.</li>
+<li>These runs used complete simulated fossil data; missing data and
+fossil measurement error remain a separate challenge.</li>
+</ul>
+<h2 id="data-sources">Data Sources</h2>
+<p>This report was assembled from the following simulation outputs and
+summaries:</p>
+<ul>
+<li><code><local checkout path>/archon-pulls/260320-052747-2ef2/analysis/summary.txt</code></li>
+<li><code>Combined CSV for targeted corrpower comparison campaign, run 1</code></li>
+<li><code>Combined CSV for targeted corrpower comparison campaign, stabilized run 2</code></li>
+<li><code>Combined CSV for corrpower fossil-recovery campaign, run 3</code></li>
+</ul>
+</body>
+</html>
