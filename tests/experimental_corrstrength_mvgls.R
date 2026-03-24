@@ -217,8 +217,13 @@ assert_true(all(is.finite(summary_reg$regime.summary$corr_strength[summary_reg$r
 
 gic_reg <- GIC(fit_corr_reg)
 aic_reg <- AIC(fit_corr_reg)
+shared_cov <- vcov(fit_corr_reg, type = "covariance")
 assert_true(is.finite(gic_reg$GIC), "GIC returned a non-finite value")
 assert_true(is.finite(aic_reg$AIC), "AIC returned a non-finite value")
+assert_true(is.matrix(shared_cov), "vcov(type = \"covariance\") should return a matrix for corr-strength fits")
+assert_true(max(abs(shared_cov - fit_corr_reg$sigma$Pinv)) < 1e-8,
+  "vcov(type = \"covariance\") should return the shared covariance template"
+)
 assert_true(abs(gic_reg$GIC - aic_reg$AIC) < 1e-8, "GIC and AIC should coincide for corr-strength ML fits")
 assert_true(gic_reg$bias_cov == fit_corr_reg$df.free_cov, "GIC bias_cov does not match df.free_cov")
 assert_true(gic_reg$bias == fit_corr_reg$df.free, "GIC bias does not match the total free parameter count")
