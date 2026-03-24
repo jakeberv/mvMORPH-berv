@@ -122,10 +122,33 @@ mvgls <- function(formula, data=list(), tree, model, method=c("PL-LOOCV","LL"), 
         # TODO handle cases with covariate for OUM
     }else k <- NULL
     if(method=="LL") penalized=FALSE else penalized=TRUE
-    if(n<p & method=="LL") stop("There are more variables than observations. Please try instead the penalized methods \"RidgeArch\", \"RidgeAlt\" or \"LASSO\"")
     
     if(root_std==0 & model=="OUM") m = m + 1
     if(isTRUE(REML)) ndimCov = n - m else ndimCov = n
+    
+    if(method=="LL" && model=="OUM"){
+        if(p >= ndimCov){
+            stop(
+                "The unpenalized OUM fit is not supported when the number of traits is greater than or equal to the effective covariance sample size (p = ",
+                p,
+                ", effective n = ",
+                ndimCov,
+                "). Please use a penalized method such as \"LOOCV\" or \"EmpBayes\".",
+                call. = FALSE
+            )
+        }
+        if(p >= 0.8 * ndimCov){
+            warning(
+                "The unpenalized OUM fit is entering a high-dimensional regime (p = ",
+                p,
+                ", effective n = ",
+                ndimCov,
+                "). On this branch, simulation diagnostics found inflated false OUM support and numerical instability as p approached the effective sample size. Prefer \"LOOCV\" or \"EmpBayes\", or validate the model choice by simulation."
+            )
+        }
+    }
+    
+    if(n<p & method=="LL") stop("There are more variables than observations. Please try instead the penalized methods \"RidgeArch\", \"RidgeAlt\" or \"LASSO\"")
 
     if(model=="BMM" && identical(bmm.structure, "corrpower")){
         return(.fit_mvgls_bmm_corrpower(
