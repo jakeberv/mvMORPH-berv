@@ -10,7 +10,7 @@
     if(!is.null(object$corrSt$regime_cov)){
         return(object$corrSt$regime_cov)
     }
-    .mvgls_bmm_corrshrink_regimes(object$variables$tree)
+    .mvgls_bmmcorr_regimes(object$variables$tree)
 }
 
 .mvgls_corrpower_omega <- function(object, sigma_object=object){
@@ -547,7 +547,7 @@
         residuals=fit$residuals,
         sigma=list(
             Pinv=fit$shared_cov,
-            P=.mvgls_bmm_corrshrink_safe_inverse(fit$shared_cov),
+            P=.mvgls_bmmcorr_safe_inverse(fit$shared_cov),
             S=NULL,
             baseline_correlation=fit$baseline_correlation,
             regime=fit$regime_vcv
@@ -578,7 +578,7 @@
         regime.summary=NULL
     )
     results$df.free <- results$df.free_cov + results$df.free_beta + results$df.free_model
-    results$regime.summary <- .mvgls_corrstrength_regime_summary(results)
+    results$regime.summary <- .mvgls_bmmcorr_regime_summary(results)
     class(results) <- "mvgls"
     results
 }
@@ -594,8 +594,8 @@
     if(isTRUE(FCI)) stop("The experimental corr-power BMM does not support FCI")
     if(!inherits(tree, "simmap")) stop("A tree of class \"simmap\" is required for bmm.structure=\"corrpower\"")
     if(scale.height) tree <- .scaleStruct(tree)
-    regime_cov <- .mvgls_bmm_corrshrink_regimes(tree)
-    reference <- .mvgls_bmm_corrshrink_reference(names(regime_cov), bmm_reference=bmm_reference)
+    regime_cov <- .mvgls_bmmcorr_regimes(tree)
+    reference <- .mvgls_bmmcorr_reference(names(regime_cov), bmm_reference=bmm_reference)
     reference_index <- reference$reference_index
     regularization <- .mvgls_bmm_corrpower_regularization()
     base_start <- if(is.null(start)) .mvgls_bmm_corrpower_start(tree, Y, X, reference_index=reference_index) else start

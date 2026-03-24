@@ -31,7 +31,7 @@ expect_error <- function(expr, pattern = NULL) {
 }
 
 start_helper <- NULL
-for (nm in c(".mvgls_bmm_corrpower_start", ".mvgls_bmm_corrstrength_start", ".mvgls_bmm_corrshrink_start")) {
+for (nm in c(".mvgls_bmm_corrpower_start", ".mvgls_bmmcorr_legacy_corrstrength_start")) {
   if (exists(nm, envir = asNamespace("mvMORPH"), inherits = FALSE)) {
     start_helper <- getFromNamespace(nm, "mvMORPH")
     break

@@ -33,7 +33,7 @@ expect_error <- function(expr, pattern = NULL) {
 `%||%` <- function(x, y) if (is.null(x)) y else x
 
 start_helper <- NULL
-for (nm in c(".mvgls_bmm_corrpower_start", ".mvgls_bmm_corrstrength_start", ".mvgls_bmm_corrshrink_start")) {
+for (nm in c(".mvgls_bmm_corrpower_start", ".mvgls_bmmcorr_legacy_corrstrength_start")) {
   if (exists(nm, envir = asNamespace("mvMORPH"), inherits = FALSE)) {
     start_helper <- getFromNamespace(nm, "mvMORPH")
     break
@@ -44,8 +44,8 @@ if (is.null(start_helper)) {
 }
 profile_helper <- NULL
 for (nm in c(".mvgls_bmm_corrpower_profile", ".mvgls_corrpower_profile",
-             ".mvgls_bmm_corrstrength_profile", ".mvgls_corrstrength_profile",
-             ".mvgls_bmm_corrshrink_profile", ".mvgls_corrshrink_profile")) {
+             ".mvgls_bmmcorr_legacy_corrstrength_profile", ".mvgls_corrstrength_profile",
+             ".mvgls_corrshrink_profile")) {
   if (exists(nm, envir = asNamespace("mvMORPH"), inherits = FALSE)) {
     profile_helper <- getFromNamespace(nm, "mvMORPH")
     break

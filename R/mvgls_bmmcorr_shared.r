@@ -1,12 +1,13 @@
 ################################################################################
 ##                                                                            ##
-##              mvMORPH: mvgls_bmm_corrshrink.r                               ##
+##                mvMORPH: mvgls_bmmcorr_shared.r                             ##
 ##                                                                            ##
-##   Experimental corr-strength BMM fit for mvgls                             ##
+##   Shared helpers for experimental BMM correlation structures               ##
+##   plus archived corr-strength internals kept for benchmark compatibility   ##
 ##                                                                            ##
 ################################################################################
 
-.mvgls_bmm_corrshrink_regimes <- function(tree){
+.mvgls_bmmcorr_regimes <- function(tree){
     mapped_edge <- tree$mapped.edge
     mapped_sum <- rowSums(mapped_edge)
     edge_ratio <- rep(1, length(mapped_sum))
@@ -30,7 +31,7 @@
     if(!is.null(object$corrSt$regime_cov)){
         return(object$corrSt$regime_cov)
     }
-    .mvgls_bmm_corrshrink_regimes(object$variables$tree)
+    .mvgls_bmmcorr_regimes(object$variables$tree)
 }
 
 .mvgls_corrshrink_omega <- function(object, sigma_object=object){
@@ -102,7 +103,7 @@
     do.call(mvgls, refit_args)
 }
 
-.mvgls_bmm_corrshrink_reference <- function(regime_names, bmm_reference=NULL){
+.mvgls_bmmcorr_reference <- function(regime_names, bmm_reference=NULL){
     k <- length(regime_names)
     if(is.null(bmm_reference)){
         reference_index <- 1L
@@ -134,7 +135,7 @@
     stats::qlogis(scaled)
 }
 
-.mvgls_bmm_corrshrink_safe_inverse <- function(x){
+.mvgls_bmmcorr_safe_inverse <- function(x){
     inv <- try(solve(x), silent=TRUE)
     if(inherits(inv, "try-error")){
         solve(x + diag(1e-8, nrow(x)))
@@ -556,7 +557,7 @@
         residuals=fit$residuals,
         sigma=list(
             Pinv=fit$template_cov_unit,
-            P=.mvgls_bmm_corrshrink_safe_inverse(fit$template_cov_unit),
+            P=.mvgls_bmmcorr_safe_inverse(fit$template_cov_unit),
             S=NULL,
             pattern=fit$pattern,
             regime=fit$regime_vcv
@@ -603,8 +604,8 @@
     if(isTRUE(FCI)) stop("The experimental corr-strength BMM does not support FCI")
     if(!inherits(tree, "simmap")) stop("A tree of class \"simmap\" is required for bmm.structure=\"corrstrength\"")
     if(scale.height) tree <- .scaleStruct(tree)
-    regime_cov <- .mvgls_bmm_corrshrink_regimes(tree)
-    reference <- .mvgls_bmm_corrshrink_reference(names(regime_cov), bmm_reference=bmm_reference)
+    regime_cov <- .mvgls_bmmcorr_regimes(tree)
+    reference <- .mvgls_bmmcorr_reference(names(regime_cov), bmm_reference=bmm_reference)
     reference_index <- reference$reference_index
     base_start <- if(is.null(start)) .mvgls_bmm_corrshrink_start(tree, Y, X, reference_index=reference_index) else start
     objective <- function(par){
@@ -701,7 +702,9 @@
     )
 }
 
-# Corrstrength aliases for downstream methods/tests on the experimental branch.
+# Legacy corr-strength aliases kept for archived benchmarks on the experimental branch.
+.mvgls_bmmcorr_legacy_corrstrength_start <- .mvgls_bmm_corrshrink_start
+.mvgls_bmmcorr_legacy_corrstrength_profile <- .mvgls_bmm_corrshrink_profile
 .mvgls_corrstrength_regime_cov <- .mvgls_corrshrink_regime_cov
 .mvgls_corrstrength_omega <- .mvgls_corrshrink_omega
 .mvgls_corrstrength_loglik <- .mvgls_corrshrink_loglik
