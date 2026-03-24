@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>OUM Simulation Summary Report</title>
+  <style>
+    /* Default styles provided by pandoc.
+    ** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+    */
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+  </style>
+  <link rel="stylesheet" href="report.css" />
+</head>
+<body>
+<header id="title-block-header">
+<h1 class="title">OUM Simulation Summary Report</h1>
+</header>
+<h1 id="oum-simulation-summary-report">OUM Simulation Summary
+Report</h1>
+<p>Generated on 2026-03-24 14:54 EDT</p>
+<h2 id="provenance">Provenance</h2>
+<ul>
+<li>Figures and summaries for the focused theta-recovery study are
+generated directly from local pulled CSVs in
+<code>archon-pulls/tg18/tests/</code>.</li>
+<li>Earlier Archon campaigns reused the same remote workspace, so some
+of their raw CSV outputs were overwritten later.</li>
+<li>For those earlier campaigns, the report uses the quantitative
+results recorded during the session and labels them as reconstructed
+summaries.</li>
+</ul>
+<h2 id="executive-summary">Executive Summary</h2>
+<ul>
+<li>The <code>mvgls(model = "OUM")</code> covariate path is mechanically
+solid: it fit successfully, preserved covariates through prediction and
+downstream methods, and behaved sensibly on real data and targeted
+tests.</li>
+<li>Within OUM, covariate detection is strong once signal is present,
+but near-null model selection is softer for discrete predictors and for
+more permissive selection methods (<code>LOOCV</code>,
+<code>EmpBayes</code>) than for <code>LL</code>.</li>
+<li>Head-to-head <code>BMM</code> vs <code>OUM</code> comparisons under
+<code>GIC</code> are asymmetric: <code>BMM</code> is recovered strongly,
+while <code>OUM</code> is much easier to miss, especially when candidate
+sets include shared models.</li>
+<li>Direct <code>OU</code> vs <code>OUM</code> comparison is better
+calibrated than <code>BMM</code> vs <code>OUM</code>, but still weak in
+mixed or high-dimensional small-sample settings.</li>
+<li>The strongest new result is that <code>theta</code> recovery is
+materially better than model selection alone suggests. In favorable
+settings, regime optima can be estimated well even before
+<code>OUM</code> wins every model comparison.</li>
+</ul>
+<h2 id="1-oum-with-covariates-what-worked">1. OUM With Covariates: What
+Worked</h2>
+<ul>
+<li>The implementation now supports standard covariate adjustment inside
+OUM fits, including painted <code>simmap</code> trees and ordinary
+regression covariates such as <code>log(mass)</code>.</li>
+<li>Targeted tests showed that the updated OUM path works with
+<code>LL</code>, penalized fits, <code>EmpBayes</code>,
+<code>error=TRUE</code>, <code>predict()</code>,
+<code>ancestral()</code>, <code>manova.gls()</code>, <code>GIC()</code>,
+and <code>EIC()</code>.</li>
+<li>On a real <code>phyllostomid</code> example, OUM plus a size
+covariate fit cleanly and returned both regime-optimum rows and
+regression-effect rows in the coefficient matrix.</li>
+</ul>
+<h2
+id="2-covariate-selection-inside-oum-reconstructed-from-dense-covariate-suite">2.
+Covariate Selection Inside OUM (Reconstructed From Dense Covariate
+Suite)</h2>
+<ul>
+<li>In the near-null region, false full-model selection ranged from
+about 12.5% to 35.0%, with <code>LL</code> consistently more
+conservative than <code>EmpBayes</code> and <code>LOOCV</code>.</li>
+<li>Weak, medium, and strong signal settings selected the full covariate
+model essentially perfectly across methods in that suite.</li>
+</ul>
+<p><img src="figures/covariate_null_selection_rates.png"
+alt="Near-null covariate selection rates" /></p>
+<h2
+id="3-bmm-vs-oum-head-to-head-reconstructed-from-direct-two-model-suite">3.
+BMM vs OUM Head-to-Head (Reconstructed From Direct Two-Model Suite)</h2>
+<ul>
+<li>In the direct <code>BMM</code> vs <code>OUM</code> comparison,
+recovery was asymmetric.</li>
+<li>Under pure <code>BMM</code> truth, the correct model was selected
+LL: 96.1%, EmpBayes: 90.4%, LOOCV: 87.9%.</li>
+<li>Under pure <code>OUM</code> truth, the correct model was selected
+LL: 71.2%, EmpBayes: 81.3%, LOOCV: 83.9%.</li>
+<li>In the same study, the shared null was still heavily tilted toward
+<code>BMM</code>, which was the first strong warning that raw
+<code>GIC</code> comparisons were not neutral between these model
+families.</li>
+</ul>
+<p><img src="figures/bmm_oum_head_to_head.png"
+alt="BMM vs OUM head-to-head recovery" /></p>
+<h2 id="4-four-model-calibration-reconstructed-from-bmoubmmoum-suite">4.
+Four-Model Calibration (Reconstructed From BM/OU/BMM/OUM Suite)</h2>
+<ul>
+<li>When the candidate set included <code>BM</code>, <code>OU</code>,
+<code>BMM</code>, and <code>OUM</code>, the shared-model truths were
+recovered asymmetrically: the correct model won 46.6% under shared BM
+truth and 82.4% under shared OU truth.</li>
+<li>In that calibration run, <code>OUM</code> was almost never the
+winner in the OUM frontier or mixed-signal phases. This showed that lack
+of an <code>OUM</code> win is weak evidence against optimum shifts when
+the candidate set is broad.</li>
+</ul>
+<h2
+id="5-direct-ou-vs-oum-detectability-reconstructed-from-dedicated-detectability-suite">5.
+Direct OU vs OUM Detectability (Reconstructed From Dedicated
+Detectability Suite)</h2>
+<ul>
+<li>Direct <code>OU</code> vs <code>OUM</code> comparison was better
+calibrated than <code>BMM</code> vs <code>OUM</code>: false
+<code>OUM</code> selection under shared-OU truth averaged 4.7% for
+balanced painted regimes and 9.2% for imbalanced regimes.</li>
+<li>But even there, detectability was limited: only 182 of 2400 pure-OUM
+frontier cells crossed 50% <code>OUM</code> selection, and only 42
+crossed 80%.</li>
+<li>Under BM-rate misspecification, detectability collapsed further:
+only 29 of 4032 misspecified cells crossed 50% selection, and only 1
+crossed 80%.</li>
+<li>That suite also showed alpha collapse under misspecification: both
+<code>OU</code> and <code>OUM</code> estimated low alpha values
+regardless of the true simulated alpha.</li>
+</ul>
+<h2 id="6-focused-theta-recovery-study-raw-csvs-pulled-locally">6.
+Focused Theta-Recovery Study (Raw CSVs Pulled Locally)</h2>
+<ul>
+<li>This focused study used the regime where OUM looked most promising:
+2 imbalanced painted regimes, higher alpha, stronger theta separation,
+and varying <code>n</code> and <code>p</code>.</li>
+<li>Overall false <code>OUM</code> selection under the null was 16.0%,
+but the failure mode was very concentrated.</li>
+<li>By number of taxa, false <code>OUM</code> selection fell from 39.5%
+at <code>n=60</code> to 5.9% at <code>n=120</code> and 2.8% at
+<code>n=240</code>.</li>
+<li>By trait dimension, the main pathological corner was
+<code>p=48</code>, where the average false <code>OUM</code> rate was
+30.1%.</li>
+</ul>
+<p><img src="figures/theta_null_heatmap.png"
+alt="False OUM selection heatmap" /></p>
+<ul>
+<li>Under pure simulated OUM, detectability improved strongly with theta
+separation: <code>OUM</code> was selected 22.2% at
+<code>theta_sep = 0.08</code>, 52.0% at <code>0.18</code>, 82.4% at
+<code>0.30</code>, and 97.9% at <code>0.60</code>.</li>
+<li>Higher alpha helped both selection and recovery. Average
+<code>OUM</code> selection rose from 59.8% at <code>alpha = 0.5</code>
+to 76.3% at <code>alpha = 1.5</code>.</li>
+<li>The fitted alpha values tracked the truth well in this focused
+regime: mean <code>alpha_hat</code> for OUM was 0.5 -&gt; 0.85; 1 -&gt;
+1.36; 1.5 -&gt; 1.88.</li>
+</ul>
+<p><img src="figures/theta_selection_vs_signal.png"
+alt="OUM selection vs signal" /></p>
+<ul>
+<li>Theta recovery improved even before selection became certain.
+Average theta correlation rose from 0.14 at
+<code>theta_sep = 0.08</code> to 0.64 at
+<code>theta_sep = 0.60</code>.</li>
+<li>At the same time, theta spread absolute error fell from 0.462 to
+0.216.</li>
+<li>More taxa were consistently helpful: theta RMSE was n=60 -&gt;
+0.097; n=120 -&gt; 0.078; n=240 -&gt; 0.062.</li>
+<li>Trait dimension changed the quality of recovery more than the raw
+RMSE. Theta correlation averaged p=8 -&gt; 0.55; p=24 -&gt; 0.36; p=48
+-&gt; 0.26, showing that the high-dimensional corner stays hard even
+when absolute RMSE looks similar.</li>
+<li>In a favorable design (<code>n=240</code>, <code>p=8</code>,
+<code>alpha=1.5</code>), the empirical 50% and 80% selection thresholds
+were about 0.080 and 0.135; at <code>p=24</code> with the same
+<code>n</code> and <code>alpha</code>, they rose to about 0.135 and
+0.195.</li>
+<li>The <code>n=60, p=48</code> corner remained pathological: it often
+selected <code>OUM</code> strongly under the null while yielding poor
+theta correlation, so those cells should not be interpreted as genuine
+detectability wins.</li>
+</ul>
+<p><img src="figures/theta_recovery_vs_signal.png"
+alt="Theta recovery vs signal" /></p>
+<p><img src="figures/theta_recovery_design_heatmap.png"
+alt="Selection versus recovery by design" /></p>
+<h2 id="practical-takeaways">Practical Takeaways</h2>
+<ul>
+<li>The new OUM regression path is software-correct enough to use for
+size-adjusted multivariate analyses with painted regimes.</li>
+<li>For model selection, <code>LL</code> is the safest default.
+<code>LOOCV</code> and <code>EmpBayes</code> are more permissive near
+the null.</li>
+<li>Direct <code>OU</code> vs <code>OUM</code> comparison is more
+interpretable than <code>BMM</code> vs <code>OUM</code> when the
+scientific question is about optimum shifts.</li>
+<li>Failure to select <code>OUM</code> is weak evidence against optimum
+shifts unless the dataset is in a favorable regime.</li>
+<li>The favorable regime looks like: moderate-to-high alpha,
+sufficiently separated regime optima, at least about 120 taxa, and
+preferably not extreme small-n/high-p settings.</li>
+<li>If the primary goal is recovering regime optima rather than just
+model selection, this focused study suggests theta can be estimated
+usefully even when <code>OUM</code> is not yet winning every
+comparison.</li>
+</ul>
+</body>
+</html>
