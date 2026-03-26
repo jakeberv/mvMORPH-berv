@@ -16,6 +16,7 @@ For a new thread, read these first:
 1. `specs/001-repo-context.md`
 2. `specs/010-fork-delta.md`
 3. `specs/020-validation-and-open-questions.md`
+4. `specs/030-bmm-simulation-runbook.md` or `specs/040-oum-simulation-runbook.md`, depending on the workstream
 
 ## Conventions
 
@@ -33,6 +34,10 @@ For a new thread, read these first:
   - detailed summary of all major changes built on top of the upstream fork baseline
 - `specs/020-validation-and-open-questions.md`
   - what has been validated locally and remotely, plus the main unresolved questions
+- `specs/030-bmm-simulation-runbook.md`
+  - how to resume local or remote simulation work for the experimental corrpower BMM family
+- `specs/040-oum-simulation-runbook.md`
+  - how to resume local or remote simulation work for the OUM extensions and model-selection studies
 - `specs/TEMPLATE.md`
   - starting point for future specs
 

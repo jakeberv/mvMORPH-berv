@@ -86,6 +86,11 @@ If a new thread starts today, it should assume:
 - `corrstrength` and `corrshrink` are historical only
 - the most valuable next work should probably build on `corrpower`, not revisit `corrstrength`
 
+Operational runbooks for resuming simulation work now live in:
+
+- `specs/030-bmm-simulation-runbook.md`
+- `specs/040-oum-simulation-runbook.md`
+
 ## Main Open Questions
 
 ### OUM
