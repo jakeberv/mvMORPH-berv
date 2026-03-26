@@ -7,7 +7,7 @@ Fit linear model using Generalized Least Squares to multivariate (high-dimension
 }
 \description{
 This function uses maximum likelihood (or restricted likelihood) and penalized likelihood approaches to fit linear models where the errors are allowed to be correlated (i.e. a GLS model for serially correlated phylogenetic and time-series data). \code{mvgls} uses a penalized-likelihood (PL) approach (see descriptions in Clavel et al. 2019) to fit linear models to high-dimensional data sets (where the number of variables \emph{p} is approaching or is larger than the number of observations \emph{n}). The PL approach generally provides improved estimates compared to ML.
-Experimental \code{bmm.structure} modes are also available for \code{model="BMM"} fits. The \code{"corrpower"} selector keeps the published reference-regime convention but combines a shared baseline correlation matrix with regime-specific scale and correlation-power parameters, allowing regimes to be either weaker or stronger than the baseline. The nested \code{"corrpower_coronly"} selector keeps the same baseline correlation machinery but removes regime-specific scale parameters, so the fit focuses only on correlation/integration differences between regimes. These modes are intended for exploratory use only.
+Experimental \code{bmm.structure} modes are also available for \code{model="BMM"} fits. The \code{"corrpower"} selector keeps the published reference-regime convention but combines a shared baseline correlation matrix with regime-specific correlation-power parameters, allowing regimes to be either weaker or stronger than the baseline. By default it also estimates regime-specific scale parameters, and the nested correlation-only version is selected with \code{bmm.structure="corrpower", bmm.scale=FALSE}. These modes are intended for exploratory use only.
 
 %%  ~~ A concise (1-5 lines) description of what the function does. ~~
 }
@@ -46,7 +46,7 @@ Use REML (default) or ML for estimating the parameters.
 \item{...}{
 Options to be passed through. For instance the type of penalization: 
 \code{penalty="RidgeArch"} (default), \code{penalty="RidgeAlt"}, or \code{penalty="LASSO"}. The target matrices used by "RidgeArch" and "RidgeAlt" penalizations: \code{target="unitVariance"}, \code{target="Variance"} or \code{target="null"}... etc. (see details)
-For \code{model="BMM"}, the experimental options \code{bmm.structure="corrpower"} and \code{bmm.structure="corrpower_coronly"} select regime-specific correlation-power models. These modes are currently restricted to \code{method="LL"}, \code{REML=FALSE}, and \code{error=NULL}, and use the legacy proportional-BMM reference convention by default. In \code{"corrpower"} the reference regime is fixed at \code{scale=1} and \code{corr_power=1}; non-reference regimes are fit with deterministic multi-start when \code{start} is omitted. In \code{"corrpower_coronly"} the reference regime is fixed at \code{corr_power=1} and only non-reference \code{corr_power} parameters are estimated. The optional \code{bmm.reference} setting chooses which SIMMAP regime is used as the reference; it can be supplied as either a regime name or a 1-based regime index, and defaults to the first mapped regime. The earlier experimental \code{"corrshrink"} and \code{"corrstrength"} selectors have been retired on this branch in favor of \code{"corrpower"}.
+For \code{model="BMM"}, the experimental option \code{bmm.structure="corrpower"} selects the regime-specific correlation-power model family. These modes are currently restricted to \code{method="LL"}, \code{REML=FALSE}, and \code{error=NULL}, and use the legacy proportional-BMM reference convention by default. With the default \code{bmm.scale=TRUE}, the reference regime is fixed at \code{scale=1} and \code{corr_power=1}; non-reference regimes are fit with deterministic multi-start when \code{start} is omitted. With \code{bmm.scale=FALSE}, the reference regime is fixed only at \code{corr_power=1} and only non-reference \code{corr_power} parameters are estimated. The optional \code{bmm.reference} setting chooses which SIMMAP regime is used as the reference; it can be supplied as either a regime name or a 1-based regime index, and defaults to the first mapped regime. The earlier experimental \code{"corrshrink"} and \code{"corrstrength"} selectors have been retired on this branch in favor of \code{"corrpower"}.
 }
 
 }
@@ -92,7 +92,7 @@ An object of class '\code{mvgls}'. It contains a list including the following co
 \item{fitted        }{the fitted values}
 \item{variables     }{the variables used for model fit}
 \item{sigma         }{the estimated covariance (Pinv) and precision (P) matrix, as well as the sample estimate (S); for the experimental BMM correlation-aware modes, this also includes the per-regime covariance matrices}
-\item{bmm.structure  }{the BMM sub-structure used for the fit. The default is the proportional model; the experimental correlation-aware modes are selected with \code{bmm.structure="corrpower"} or \code{bmm.structure="corrpower_coronly"}. The earlier experimental \code{"corrshrink"} and \code{"corrstrength"} selectors have been retired on this branch.}
+\item{bmm.structure  }{the BMM sub-structure used for the fit. The default is the proportional model; the experimental correlation-aware mode is selected with \code{bmm.structure="corrpower"}. Set \code{bmm.scale=FALSE} to use the nested correlation-only version. The earlier experimental \code{"corrshrink"} and \code{"corrstrength"} selectors have been retired on this branch.}
 \item{reference_regime}{for the experimental correlation-aware BMM modes, the SIMMAP regime fixed at \code{scale=1} or \code{corr_power=1} for identifiability}
 \item{model         }{the evolutionary model. But more generally, the model used to specify the structure within the residuals}
 \item{logLik	    	}{either the (negative) log-likelihood when \code{method="LL"} or the cross-validated penalized likelihood}
@@ -101,11 +101,11 @@ An object of class '\code{mvgls}'. It contains a list including the following co
 \item{df.free_cov }{the number of covariance parameters used for information criteria when available}
 \item{df.free_beta}{the number of regression coefficients used for information criteria when available}
 \item{df.free_model}{the number of regime-specific BMM parameters used for information criteria when available}
-\item{regime.summary}{for experimental \code{bmm.structure="corrpower"} fits, a derived per-regime summary table with the raw \code{scale} and \code{corr_power} parameters alongside average variance/rate, covariance, and correlation summaries computed from the fitted regime covariance matrices. For \code{bmm.structure="corrpower_coronly"}, the same table is returned without the raw \code{scale} column.}
+\item{regime.summary}{for experimental \code{bmm.structure="corrpower"} fits, a derived per-regime summary table with the raw \code{corr_power} parameter alongside average variance/rate, covariance, and correlation summaries computed from the fitted regime covariance matrices. When \code{bmm.scale=TRUE} it also includes the raw \code{scale} column; when \code{bmm.scale=FALSE} that raw scale column is omitted.}
 \item{tuning		    }{the regularization/tuning parameter estimated for the penalized likelihood}
 \item{mserr		    	}{the estimated standard error when \code{error=TRUE}}
 \item{start_values  }{the starting parameters used for the optimization of the LL or PL}
-\item{diagnostics   }{for experimental \code{bmm.structure="corrpower"} and \code{bmm.structure="corrpower_coronly"} fits, a list with a structure-specific component describing the deterministic multi-start search and fit stability flags, including \code{nstarts}, \code{selected_start_id}, \code{reference_regime}, the attempted \code{start_table}, and boundary/pathology indicators.}
+\item{diagnostics   }{for experimental \code{bmm.structure="corrpower"} fits, a list with a structure-specific component describing the deterministic multi-start search and fit stability flags, including \code{nstarts}, \code{selected_start_id}, \code{reference_regime}, the attempted \code{start_table}, and boundary/pathology indicators. The same diagnostics helper is used for both \code{bmm.scale=TRUE} and \code{bmm.scale=FALSE}.}
 \item{corrSt        }{a list including the transformed tree, the determinant obtained from its covariance matrix and the normalized variables (by the inverse square root of the covariance matrix of the phylogenetic tree or the time-series). For the experimental correlation-aware BMM modes this list may be reduced to the bookkeeping information needed by the likelihood evaluator, including the selected reference regime.}
 \item{penalty       }{the penalty used for the penalized likelihood approach}
 \item{target        }{the target used with the "RidgeArch" or "RidgeAlt" penalized likelihood approaches}
@@ -157,7 +157,6 @@ Julien Clavel
 \code{\link{vcov.mvgls}}
 \code{\link{predict.mvgls}}
 \code{\link{corrpower_diagnostics}}
-\code{\link{corrpower_coronly_diagnostics}}
 %% ~~objects to See Also as \code{\link{help}}, ~~~
 }
 

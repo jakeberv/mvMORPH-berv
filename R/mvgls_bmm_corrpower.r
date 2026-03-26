@@ -56,19 +56,23 @@
 
 .mvgls_corrpower_structure <- function(object){
     structure <- object$bmm.structure %||% "corrpower"
-    if(!structure %in% c("corrpower", "corrpower_coronly")) structure <- "corrpower"
+    if(!identical(structure, "corrpower")) structure <- "corrpower"
     structure
 }
 
+.mvgls_corrpower_include_scale <- function(object){
+    include_scale <- object$corrSt$include_scale %||% object$bmm.scale %||% TRUE
+    !identical(include_scale, FALSE)
+}
+
 .mvgls_corrpower_diag_key <- function(structure){
-    if(identical(structure, "corrpower_coronly")) "corrpower_coronly" else "corrpower"
+    "corrpower"
 }
 
 .mvgls_corrpower_refit <- function(object, Y, start=object$opt$par, echo=FALSE){
     if(is.null(object$model.frame)){
         stop("corr-power refits require the original model.frame on the fitted object")
     }
-    structure <- .mvgls_corrpower_structure(object)
     refit_args <- list(
         formula=object$formula,
         data=object$model.frame,
@@ -77,7 +81,8 @@
         method="LL",
         REML=FALSE,
         response=as.matrix(Y),
-        bmm.structure=structure,
+        bmm.structure="corrpower",
+        bmm.scale=.mvgls_corrpower_include_scale(object),
         bmm.reference=object$reference_regime,
         grid.search=FALSE,
         start=start,
@@ -478,7 +483,7 @@
 
 .mvgls_corrpower_profile1d <- function(object, regime, param=c("corr_power", "scale"), grid, optimization=NULL, parameter=NULL){
     if(!is.null(parameter)) param <- parameter
-    include_scale <- identical(.mvgls_corrpower_structure(object), "corrpower")
+    include_scale <- .mvgls_corrpower_include_scale(object)
     choices <- if(isTRUE(include_scale)) c("corr_power", "scale") else "corr_power"
     param <- match.arg(param, choices)
     regime_names <- names(object$sigma$regime)
@@ -639,12 +644,13 @@
         mserr=NA,
         start_values=start_values,
         corrSt=list(
-            type=structure,
+            type="corrpower",
             phy=tree,
             X=variables$X,
             Y=variables$Y,
             regime_cov=fit$regime_cov,
-            reference_regime=reference_regime
+            reference_regime=reference_regime,
+            include_scale=isTRUE(include_scale)
         ),
         penalty="LL",
         target="LL",
@@ -652,8 +658,9 @@
         FCI=NA,
         const_mtd=NA,
         opt=fit$opt,
-        diagnostics=stats::setNames(list(diagnostics), diag_key),
-        bmm.structure=structure,
+        diagnostics=stats::setNames(list(diagnostics), "corrpower"),
+        bmm.structure="corrpower",
+        bmm.scale=isTRUE(include_scale),
         df.free_cov=dims$p * (dims$p + 1) / 2,
         df.free_beta=length(fit$coefficients),
         df.free_model=(length(regime_names) - 1) * if(isTRUE(include_scale)) 2 else 1,
@@ -837,7 +844,7 @@
 
 .fit_mvgls_bmm_corrpower <- function(formula, call_obj, model_fr, X, Y, tree, terms, xlevels, contrasts, assign,
                                      qrx, method, REML, penalty, target, optimization, start,
-                                     mserr, FCI, hessian, scale.height, bmm_reference=NULL){
+                                     mserr, FCI, hessian, scale.height, bmm_reference=NULL, bmm_scale=TRUE){
     .fit_mvgls_bmm_corrpower_impl(
         formula=formula,
         call_obj=call_obj,
@@ -862,7 +869,7 @@
         scale.height=scale.height,
         bmm_reference=bmm_reference,
         structure="corrpower",
-        include_scale=TRUE
+        include_scale=isTRUE(bmm_scale)
     )
 }
 
@@ -892,7 +899,7 @@
         hessian=hessian,
         scale.height=scale.height,
         bmm_reference=bmm_reference,
-        structure="corrpower_coronly",
+        structure="corrpower",
         include_scale=FALSE
     )
 }

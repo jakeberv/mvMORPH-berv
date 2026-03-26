@@ -7,7 +7,7 @@ Extended Information Criterion (EIC) to compare models fit with \code{mvgls} (or
 
 \description{
 The EIC (Ishiguro et al. 1997, Kitagawa & Konishi 2010), uses bootstrap to estimate the bias term of the Extended Information Criterion. This criterion allows comparing models fit by Maximum Likelihood (ML) or Penalized Likelihood (PL).
-Experimental \code{mvgls} fits with \code{model="BMM"} and \code{bmm.structure="corrpower"} or \code{"corrpower_coronly"} are supported in ML mode, and the criterion is computed with a parametric-bootstrap estimate of the bias term for those correlation-power structures.
+Experimental \code{mvgls} fits with \code{model="BMM"} and \code{bmm.structure="corrpower"} are supported in ML mode, including the nested correlation-only version selected with \code{bmm.scale=FALSE}, and the criterion is computed with a parametric-bootstrap estimate of the bias term for those correlation-power structures.
 }
 
 \usage{

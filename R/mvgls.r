@@ -25,7 +25,21 @@ mvgls <- function(formula, data=list(), tree, model, method=c("PL-LOOCV","LL"), 
         if(identical(bmm.structure, "corrstrength")){
             stop("Experimental bmm.structure=\"corrstrength\" has been retired on this branch; use bmm.structure=\"corrpower\"")
         }
-        bmm.structure <- match.arg(bmm.structure, c("proportional", "corrpower", "corrpower_coronly"))
+        if(identical(bmm.structure, "corrpower_coronly")){
+            warning("Experimental bmm.structure=\"corrpower_coronly\" is deprecated; use bmm.structure=\"corrpower\", bmm.scale=FALSE")
+            bmm.structure <- "corrpower"
+            if(is.null(args[["bmm.scale"]])) args[["bmm.scale"]] <- FALSE
+        }
+        bmm.structure <- match.arg(bmm.structure, c("proportional", "corrpower"))
+    }
+    if(is.null(args[["bmm.scale"]])){
+        bmm.scale <- TRUE
+    }else{
+        bmm.scale <- as.logical(args[["bmm.scale"]][1])
+        if(is.na(bmm.scale)) stop("\"bmm.scale\" must be TRUE or FALSE")
+    }
+    if(!identical(bmm.structure, "corrpower") && "bmm.scale" %in% names(args)){
+        stop("\"bmm.scale\" is only supported with bmm.structure=\"corrpower\"")
     }
     if(is.null(args[["bmm.reference"]])) bmm.reference <- NULL else bmm.reference <- args[["bmm.reference"]]
     if(is.null(args[["scale.height"]])) scale.height <- FALSE else scale.height <- args$scale.height
@@ -173,33 +187,8 @@ mvgls <- function(formula, data=list(), tree, model, method=c("PL-LOOCV","LL"), 
             FCI=FCI,
             hessian=hessian,
             scale.height=scale.height,
-            bmm_reference=bmm.reference
-        ))
-    }
-    if(model=="BMM" && identical(bmm.structure, "corrpower_coronly")){
-        return(.fit_mvgls_bmm_corrpower_coronly(
-            formula=formula,
-            call_obj=match.call(),
-            model_fr=model_fr,
-            X=X,
-            Y=Y,
-            tree=tree,
-            terms=terms,
-            xlevels=xlevels,
-            contrasts=contrasts,
-            assign=assign,
-            qrx=qrx,
-            method=method,
-            REML=REML,
-            penalty=penalty,
-            target=target,
-            optimization=optimization,
-            start=start,
-            mserr=mserr,
-            FCI=FCI,
-            hessian=hessian,
-            scale.height=scale.height,
-            bmm_reference=bmm.reference
+            bmm_reference=bmm.reference,
+            bmm_scale=bmm.scale
         ))
     }
     

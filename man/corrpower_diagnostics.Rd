@@ -6,7 +6,7 @@
 Diagnostics For Experimental Corr-Power mvgls Fits
 }
 \description{
-User-facing diagnostics for experimental \code{mvgls} fits with \code{model="BMM"} and \code{bmm.structure="corrpower"}.
+User-facing diagnostics for experimental \code{mvgls} fits with \code{model="BMM"} and \code{bmm.structure="corrpower"}, including the nested correlation-only variant selected with \code{bmm.scale=FALSE}.
 }
 \usage{
 corrpower_diagnostics(object, ...)
@@ -25,7 +25,7 @@ A fitted \code{mvgls} object with \code{model="BMM"} and \code{bmm.structure="co
 }
 
 \item{parm}{
-Optional character vector naming the regime-specific raw parameters to report in \code{confint()}. Valid names are of the form \code{"<regime>.scale"} and \code{"<regime>.corr_power"}.
+Optional character vector naming the regime-specific raw parameters to report in \code{confint()}. With \code{bmm.scale=TRUE}, valid names are of the form \code{"<regime>.scale"} and \code{"<regime>.corr_power"}. With \code{bmm.scale=FALSE}, only \code{"<regime>.corr_power"} names are available.
 }
 
 \item{level}{
@@ -68,14 +68,14 @@ Unused, for compatibility.
 \code{corrpower_diagnostics()} summarizes the current experimental corr-power fit along three axes:
 
 \enumerate{
-\item raw regime parameters (\code{scale} and \code{corr_power}) with profile and/or bootstrap summaries,
+\item raw regime parameters (\code{corr_power}, and \code{scale} when \code{bmm.scale=TRUE}) with profile and/or bootstrap summaries,
 \item derived regime summaries such as mean rate, variance, and correlation based on \code{sigma$regime},
 \item anchor-sensitivity summaries obtained by refitting the same response matrix under alternative \code{bmm.reference} choices.
 }
 
 The returned object has class \code{"corrpower_diagnostics"} and contains data.frames named \code{parameter_summary}, \code{regime_summary}, \code{anchor_summary}, and \code{anchor_pairwise_cov}, plus a small \code{acceptance} list summarizing the seeded anchor-sensitivity checks.
 
-\code{confint()} is a lighter-weight front end returning only the regime-level raw parameter intervals.
+\code{confint()} is a lighter-weight front end returning only the regime-level raw parameter intervals. For correlation-only fits selected with \code{bmm.scale=FALSE}, the raw intervals are reported only for \code{corr_power}.
 }
 \value{
 \code{corrpower_diagnostics()} returns an object of class \code{"corrpower_diagnostics"}.

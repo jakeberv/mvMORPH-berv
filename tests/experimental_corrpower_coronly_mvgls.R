@@ -74,7 +74,8 @@ fit_coronly <- function(formula, data, tree, bmm.reference = NULL) {
     model = "BMM",
     method = "LL",
     REML = FALSE,
-    bmm.structure = "corrpower_coronly",
+    bmm.structure = "corrpower",
+    bmm.scale = FALSE,
     bmm.reference = bmm.reference,
     echo = FALSE
   )
@@ -88,14 +89,15 @@ Y <- simulate_response(tree, list(A = base_sigma, B = derived_sigma), seed = 202
 
 fit <- fit_coronly(Y ~ 1, data = list(Y = Y), tree = tree)
 
-assert_true(identical(fit$bmm.structure, "corrpower_coronly"), "fit did not record corrpower_coronly as the structure")
-assert_true(all(!grepl("\\.scale$", names(fit$param))), "corrpower_coronly should not expose raw scale parameters")
-assert_true(all(grepl("\\.corr_power$", names(fit$param))), "corrpower_coronly should expose corr_power parameters")
-assert_true(is.data.frame(fit$regime.summary), "corrpower_coronly fit did not store a regime.summary table")
-assert_true(!"scale" %in% colnames(fit$regime.summary), "corrpower_coronly regime.summary should not include a scale column")
+assert_true(identical(fit$bmm.structure, "corrpower"), "fit did not record corrpower as the structure")
+assert_true(isFALSE(fit$bmm.scale), "fit did not record bmm.scale = FALSE")
+assert_true(all(!grepl("\\.scale$", names(fit$param))), "corrpower with bmm.scale=FALSE should not expose raw scale parameters")
+assert_true(all(grepl("\\.corr_power$", names(fit$param))), "corrpower with bmm.scale=FALSE should expose corr_power parameters")
+assert_true(is.data.frame(fit$regime.summary), "corrpower with bmm.scale=FALSE did not store a regime.summary table")
+assert_true(!"scale" %in% colnames(fit$regime.summary), "corrpower with bmm.scale=FALSE regime.summary should not include a scale column")
 assert_true(all(c("reference", "corr_power", "mean_rate", "mean_variance", "mean_covariance",
                   "mean_correlation", "mean_abs_correlation") %in% colnames(fit$regime.summary)),
-            "corrpower_coronly regime.summary is missing expected columns")
+            "corrpower with bmm.scale=FALSE regime.summary is missing expected columns")
 
 for (nm in names(fit$sigma$regime)) {
   mat <- fit$sigma$regime[[nm]]
@@ -109,7 +111,7 @@ eic <- EIC(fit, nboot = 3L, nbcores = 1L)
 assert_true(is.finite(gic$GIC), "GIC returned a non-finite value")
 assert_true(is.finite(aic$AIC), "AIC returned a non-finite value")
 assert_true(is.finite(eic$EIC), "EIC returned a non-finite value")
-assert_true(abs(gic$GIC - aic$AIC) < 1e-8, "GIC and AIC should coincide for corrpower_coronly ML fits")
+assert_true(abs(gic$GIC - aic$AIC) < 1e-8, "GIC and AIC should coincide for corrpower ML fits with bmm.scale=FALSE")
 
 sim <- simulate(fit, nsim = 2, seed = 1)
 assert_true(is.list(sim) && length(sim) == 2L, "simulate() should return a list of length 2 for nsim = 2")
@@ -128,12 +130,12 @@ norm_resid <- residuals(fit, type = "normalized")
 assert_true(identical(dim(norm_resid), dim(Y)), "normalized residuals have the wrong dimensions")
 assert_true(all(is.finite(norm_resid)), "normalized residuals contain non-finite values")
 
-diag_api <- corrpower_coronly_diagnostics(fit, nboot = 4L, nbcores = 1L, profile_points = 5L)
-assert_true(inherits(diag_api, "corrpower_coronly_diagnostics"), "corrpower_coronly_diagnostics() returned the wrong class")
+diag_api <- corrpower_diagnostics(fit, nboot = 4L, nbcores = 1L, profile_points = 5L)
+assert_true(inherits(diag_api, "corrpower_diagnostics"), "corrpower_diagnostics() returned the wrong class")
 assert_true(all(c("parameter_summary", "regime_summary", "anchor_summary", "anchor_pairwise_cov", "acceptance") %in% names(diag_api)),
-            "corrpower_coronly_diagnostics() is missing expected top-level components")
+            "corrpower_diagnostics() is missing expected top-level components")
 assert_true(any(diag_api$parameter_summary$label == "B.corr_power"), "diagnostics missing the derived corr_power parameter")
-assert_true(!any(diag_api$parameter_summary$label == "B.scale"), "corrpower_coronly diagnostics should not report a scale parameter")
+assert_true(!any(diag_api$parameter_summary$label == "B.scale"), "corrpower diagnostics should not report a scale parameter when bmm.scale=FALSE")
 
 conf <- confint(fit, method = "both", nboot = 4L, profile_points = 5L)
 assert_true(is.data.frame(conf), "confint() should return a data.frame when method = 'both'")
@@ -141,4 +143,4 @@ assert_true(all(grepl("corr_power", rownames(conf), fixed = TRUE)), "confint() s
 assert_true(all(c("estimate", "profile_low", "profile_high", "bootstrap_low", "bootstrap_high") %in% colnames(conf)),
             "confint() is missing expected summary columns")
 
-cat("corrpower_coronly mvgls harness checks passed\n")
+cat("corrpower (bmm.scale=FALSE) mvgls harness checks passed\n")

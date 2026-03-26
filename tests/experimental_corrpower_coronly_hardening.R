@@ -67,15 +67,16 @@ fit_coronly <- function(formula, data, tree, bmm.reference = NULL) {
     model = "BMM",
     method = "LL",
     REML = FALSE,
-    bmm.structure = "corrpower_coronly",
+    bmm.structure = "corrpower",
+    bmm.scale = FALSE,
     bmm.reference = bmm.reference,
     echo = FALSE
   )
 }
 
 get_diag <- function(fit) {
-  diag <- fit$diagnostics[["corrpower_coronly"]]
-  if (is.null(diag)) stop("corrpower_coronly fit did not populate diagnostics$corrpower_coronly", call. = FALSE)
+  diag <- fit$diagnostics[["corrpower"]]
+  if (is.null(diag)) stop("corrpower fit with bmm.scale=FALSE did not populate diagnostics$corrpower", call. = FALSE)
   diag
 }
 
@@ -91,27 +92,27 @@ hard_Y <- simulate_response(hard_tree, list(A = base_sigma, B = apply_corrpower(
 easy_fit <- fit_coronly(Y ~ 1, data = list(Y = easy_Y), tree = easy_tree)
 easy_diag <- get_diag(easy_fit)
 
-assert_true(is.data.frame(easy_diag$start_table), "diagnostics$corrpower_coronly$start_table must be a data.frame")
-assert_true(nrow(easy_diag$start_table) >= 4L, "corrpower_coronly should populate deterministic multistart candidates")
-assert_true(!"scale_multiplier" %in% names(easy_diag$start_table), "corrpower_coronly should not expose a scale_multiplier column")
-assert_true("corr_power_seed" %in% names(easy_diag$start_table), "corrpower_coronly start_table should expose corr_power_seed")
-assert_true(sum(as.logical(easy_diag$start_table$selected)) == 1L, "exactly one corrpower_coronly start should be marked selected")
+assert_true(is.data.frame(easy_diag$start_table), "diagnostics$corrpower$start_table must be a data.frame")
+assert_true(nrow(easy_diag$start_table) >= 4L, "corrpower with bmm.scale=FALSE should populate deterministic multistart candidates")
+assert_true(!"scale_multiplier" %in% names(easy_diag$start_table), "corrpower with bmm.scale=FALSE should not expose a scale_multiplier column")
+assert_true("corr_power_seed" %in% names(easy_diag$start_table), "corrpower with bmm.scale=FALSE start_table should expose corr_power_seed")
+assert_true(sum(as.logical(easy_diag$start_table$selected)) == 1L, "exactly one corrpower start should be marked selected")
 
 best_objective <- min(easy_diag$start_table$objective_value[is.finite(easy_diag$start_table$objective_value)])
 assert_true(
   abs(easy_diag$start_table$objective_value[easy_diag$start_table$selected] - best_objective) < 1e-6,
-  "selected corrpower_coronly fit does not match the best finite candidate"
+  "selected corrpower fit with bmm.scale=FALSE does not match the best finite candidate"
 )
-assert_true(is.finite(as.numeric(easy_fit$logLik)), "selected corrpower_coronly fit should report a finite log-likelihood")
+assert_true(is.finite(as.numeric(easy_fit$logLik)), "selected corrpower fit with bmm.scale=FALSE should report a finite log-likelihood")
 
 alt_ref_fit_name <- fit_coronly(Y ~ 1, data = list(Y = easy_Y), tree = easy_tree, bmm.reference = "B")
 alt_ref_fit_index <- fit_coronly(Y ~ 1, data = list(Y = easy_Y), tree = easy_tree, bmm.reference = 2L)
 assert_true(identical(alt_ref_fit_name$reference_regime, "B"), "named bmm.reference did not set the expected anchor")
 assert_true(identical(alt_ref_fit_index$reference_regime, "B"), "indexed bmm.reference did not set the expected anchor")
 assert_true(abs(as.numeric(alt_ref_fit_name$logLik) - as.numeric(easy_fit$logLik)) < 2e-2,
-            "switching the corrpower_coronly reference by name should preserve fit quality up to optimizer tolerance")
+            "switching the corrpower reference by name should preserve fit quality up to optimizer tolerance")
 assert_true(abs(as.numeric(alt_ref_fit_index$logLik) - as.numeric(alt_ref_fit_name$logLik)) < 1e-5,
-            "switching the corrpower_coronly reference by index should match the named reference fit")
+            "switching the corrpower reference by index should match the named reference fit")
 
 user_X <- matrix(1, nrow = nrow(easy_Y), ncol = 1L, dimnames = list(rownames(easy_Y), "(Intercept)"))
 user_start <- start_helper(easy_tree, easy_Y, user_X, include_scale = FALSE)
@@ -122,17 +123,18 @@ user_fit <- mvgls(
   model = "BMM",
   method = "LL",
   REML = FALSE,
-  bmm.structure = "corrpower_coronly",
+  bmm.structure = "corrpower",
+  bmm.scale = FALSE,
   start = user_start,
   echo = FALSE
 )
 user_diag <- get_diag(user_fit)
-assert_true(nrow(user_diag$start_table) == 1L, "user-provided corrpower_coronly start should disable multistart")
+assert_true(nrow(user_diag$start_table) == 1L, "user-provided corrpower start should disable multistart")
 assert_true(all(as.character(user_diag$start_table$source) == "user-provided"),
-            "user-provided corrpower_coronly start was not marked correctly")
+            "user-provided corrpower start was not marked correctly")
 
 summary_out <- capture.output(summary(easy_fit))
-assert_true(any(grepl("Corr-power", summary_out, fixed = TRUE)) || any(grepl("corrpower_coronly", summary_out, fixed = TRUE)),
+assert_true(any(grepl("Corr-power", summary_out, fixed = TRUE)),
             "summary output did not mention corr-power terminology")
 assert_true(any(grepl("selected", summary_out, fixed = TRUE)), "summary output did not report the selected start")
 assert_true(any(grepl("corr_power", summary_out, fixed = TRUE)), "summary output did not report corr_power terminology")
@@ -146,7 +148,7 @@ corr_profile <- profile_helper(
   regime = "B",
   grid = seq(0.25, 1.5, length.out = 5L)
 )
-assert_true(is.data.frame(corr_profile), "corrpower_coronly corr_power profile helper should return a data.frame")
+assert_true(is.data.frame(corr_profile), "corrpower corr_power profile helper should return a data.frame")
 expect_error(
   profile_helper(
     object = easy_fit,
@@ -161,7 +163,7 @@ hard_fit <- fit_coronly(Y ~ 1, data = list(Y = hard_Y), tree = hard_tree)
 hard_diag <- get_diag(hard_fit)
 assert_true(
   isTRUE(hard_diag$boundary_corr_power) || isTRUE(hard_diag$pathological_corr_power),
-  "difficult corrpower_coronly case did not trigger a corr_power stability flag"
+  "difficult corrpower case did not trigger a corr_power stability flag"
 )
 
 expect_error(
@@ -178,4 +180,4 @@ expect_error(
   "retired on this branch"
 )
 
-cat("corrpower_coronly hardening harness checks passed\n")
+cat("corrpower (bmm.scale=FALSE) hardening harness checks passed\n")

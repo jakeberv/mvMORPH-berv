@@ -60,7 +60,8 @@ fit_coronly <- function(formula, data, tree, bmm.reference = NULL) {
     model = "BMM",
     method = "LL",
     REML = FALSE,
-    bmm.structure = "corrpower_coronly",
+    bmm.structure = "corrpower",
+    bmm.scale = FALSE,
     bmm.reference = bmm.reference,
     echo = FALSE
   )
@@ -85,7 +86,7 @@ scenario_fit <- function(label, tree, Y, formula, data, expected_direction) {
                     "mean_correlation", "mean_abs_correlation") %in% colnames(fit$regime.summary)),
               sprintf("%s regime.summary is missing expected columns", label))
   assert_true(is.finite(as.numeric(fit$logLik)), sprintf("%s produced a non-finite logLik", label))
-  diag <- corrpower_coronly_diagnostics(fit, nboot = 4L, nbcores = 1L, profile_points = 5L)
+  diag <- corrpower_diagnostics(fit, nboot = 4L, nbcores = 1L, profile_points = 5L)
   assert_true(any(diag$parameter_summary$label == "B.corr_power"), sprintf("%s diagnostics missing B.corr_power", label))
   assert_true(!any(diag$parameter_summary$label == "B.scale"), sprintf("%s diagnostics should not include scale", label))
   conf <- confint(fit, method = "profile", profile_points = 5L)
@@ -152,4 +153,4 @@ anc <- ancestral(covariate_fit, newdata = node_newdata)
 assert_true(is.matrix(anc), "ancestral() should return a matrix for the covariate scenario")
 assert_true(ncol(anc) == ncol(covariate_Y), "ancestral() returned the wrong number of trait columns for the covariate scenario")
 
-cat("corrpower_coronly identifiability harness checks passed\n")
+cat("corrpower (bmm.scale=FALSE) identifiability harness checks passed\n")
