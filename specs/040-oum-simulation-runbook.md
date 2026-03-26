@@ -48,6 +48,14 @@ Key validation file:
 - `tests/experimental_bmm_oum_model_selection_grid.R`
   - broader calibration grid spanning BM, OU, BMM, and OUM
 
+### Legacy Broad Covariate Grid
+
+- `tests/experimental_oum_covariate_grid.R`
+  - early broad covariate-oriented OUM sweep kept mainly for baseline smoke coverage
+  - a later unmerged rewrite expanded this script with richer predictor families (`cont_indep`, `cont_confounded`, `disc_binary`, `disc3_sparse_confounded`), explicit near-null effect-size sweeps, and generic `delta50` / `delta80` sharpness summaries
+  - those ideas were mostly superseded by the focused scripts above, so future work should extend the focused suites rather than revive the broad-grid rewrite wholesale
+  - if a future thread wants a single broad covariate sweep again, the only idea worth selectively reusing is the generic near-null sharpness summary layer
+
 ### Summary Report
 
 - `tests/reports/oum_simulation_summary_report.md`
