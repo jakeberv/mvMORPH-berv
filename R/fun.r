@@ -1369,7 +1369,7 @@ simulate.mvgls<-function(object,nsim=1,seed=NULL,...){
   if(is.null(param[["method"]])){ methodSim <- "cholesky" }else{ methodSim <- param$method }
   if(!is.null(seed)) set.seed(seed)
   
-  if(isTRUE(!is.null(object$bmm.structure) && object$bmm.structure %in% c("corrstrength", "corrpower"))){
+  if(isTRUE(!is.null(object$bmm.structure) && object$bmm.structure %in% c("corrstrength", "corrpower", "corrpower_coronly"))){
     residuals_sim <- mvSIM(
       tree=object$variables$tree,
       model="BMM",

@@ -16,11 +16,12 @@ GIC <- function(object, ...) UseMethod("GIC")
 EIC <- function(object, nboot=100L, nbcores=1L, ...) UseMethod("EIC")
 corrstrength_diagnostics <- function(object, ...) UseMethod("corrstrength_diagnostics")
 corrpower_diagnostics <- function(object, ...) UseMethod("corrpower_diagnostics")
+corrpower_coronly_diagnostics <- function(object, ...) UseMethod("corrpower_coronly_diagnostics")
 `%||%` <- function(x, y) if(is.null(x)) y else x
 
 .mvgls_bmmcorr_structure <- function(object){
     structure <- object$bmm.structure %||% NULL
-    if(is.null(structure) || !structure %in% c("corrstrength", "corrpower")) return(NULL)
+    if(is.null(structure) || !structure %in% c("corrstrength", "corrpower", "corrpower_coronly")) return(NULL)
     structure
 }
 
@@ -32,6 +33,14 @@ corrpower_diagnostics <- function(object, ...) UseMethod("corrpower_diagnostics"
     identical(.mvgls_bmmcorr_structure(object), "corrpower")
 }
 
+.mvgls_is_corrpower_coronly <- function(object){
+    identical(.mvgls_bmmcorr_structure(object), "corrpower_coronly")
+}
+
+.mvgls_is_corrpower_family <- function(object){
+    .mvgls_is_corrpower(object) || .mvgls_is_corrpower_coronly(object)
+}
+
 .mvgls_is_bmmcorr <- function(object){
     !is.null(.mvgls_bmmcorr_structure(object))
 }
@@ -41,6 +50,7 @@ corrpower_diagnostics <- function(object, ...) UseMethod("corrpower_diagnostics"
     label <- switch(structure,
         corrstrength="corr-strength",
         corrpower="corr-power",
+        corrpower_coronly="corr-power (correlation-only)",
         "experimental correlation"
     )
     if(capitalize) {
@@ -54,9 +64,15 @@ corrpower_diagnostics <- function(object, ...) UseMethod("corrpower_diagnostics"
     structure <- structure %||% if(!is.null(object)) .mvgls_bmmcorr_structure(object) else "corrpower"
     switch(structure,
         corrpower="corr_power",
+        corrpower_coronly="corr_power",
         corrstrength="corr_strength",
         "corr_strength"
     )
+}
+
+.mvgls_bmmcorr_has_scale_param <- function(object=NULL, structure=NULL){
+    structure <- structure %||% if(!is.null(object)) .mvgls_bmmcorr_structure(object) else "corrpower"
+    !identical(structure, "corrpower_coronly")
 }
 
 .mvgls_bmmcorr_regime_param <- function(object, regime_name, param_name){
@@ -69,12 +85,17 @@ corrpower_diagnostics <- function(object, ...) UseMethod("corrpower_diagnostics"
 .mvgls_bmmcorr_primary_param_names <- function(object, include_reference=TRUE){
     if(is.null(object$sigma) || is.null(object$sigma$regime)) return(character(0))
     cor_param <- .mvgls_bmmcorr_cor_param_name(object)
+    has_scale <- .mvgls_bmmcorr_has_scale_param(object)
     regime_names <- names(object$sigma$regime)
     if(is.null(regime_names)) regime_names <- character(0)
     if(!include_reference && !is.null(object$reference_regime)){
         regime_names <- setdiff(regime_names, object$reference_regime)
     }
-    as.vector(rbind(paste0(regime_names, ".scale"), paste0(regime_names, ".", cor_param)))
+    if(has_scale){
+        as.vector(rbind(paste0(regime_names, ".scale"), paste0(regime_names, ".", cor_param)))
+    }else{
+        paste0(regime_names, ".", cor_param)
+    }
 }
 
 .mvgls_bmmcorr_parse_parm <- function(object, parm){
@@ -257,6 +278,7 @@ corrpower_diagnostics <- function(object, ...) UseMethod("corrpower_diagnostics"
     switch(.mvgls_bmmcorr_structure(object),
         corrstrength=.mvgls_corrstrength_loglik(Y, object=object, coefficients=coefficients, sigma_object=sigma_object),
         corrpower=.mvgls_corrpower_loglik(Y, object=object, coefficients=coefficients, sigma_object=sigma_object),
+        corrpower_coronly=.mvgls_corrpower_loglik(Y, object=object, coefficients=coefficients, sigma_object=sigma_object),
         stop("Experimental BMM correlation log-likelihood is unavailable for this fit")
     )
 }
@@ -265,6 +287,7 @@ corrpower_diagnostics <- function(object, ...) UseMethod("corrpower_diagnostics"
     switch(.mvgls_bmmcorr_structure(object),
         corrstrength=.mvgls_corrstrength_refit(object, Y, start=start, echo=echo),
         corrpower=.mvgls_corrpower_refit(object, Y, start=start, echo=echo),
+        corrpower_coronly=.mvgls_corrpower_refit(object, Y, start=start, echo=echo),
         stop("Experimental BMM correlation refit helper is unavailable for this fit")
     )
 }
@@ -273,6 +296,7 @@ corrpower_diagnostics <- function(object, ...) UseMethod("corrpower_diagnostics"
     switch(.mvgls_bmmcorr_structure(object),
         corrstrength=.mvgls_corrstrength_profile(object=object, parameter=parameter, regime=regime, grid=grid, optimization=optimization),
         corrpower=.mvgls_corrpower_profile(object=object, parameter=parameter, regime=regime, grid=grid, optimization=optimization),
+        corrpower_coronly=.mvgls_corrpower_profile(object=object, parameter=parameter, regime=regime, grid=grid, optimization=optimization),
         stop("Experimental BMM correlation profile helper is unavailable for this fit")
     )
 }
@@ -280,7 +304,7 @@ corrpower_diagnostics <- function(object, ...) UseMethod("corrpower_diagnostics"
 .mvgls_bmmcorr_boundary_indicator <- function(refit, cor_est){
     cor_param <- .mvgls_bmmcorr_cor_param_name(refit)
     if(!is.finite(cor_est)) return(NA_real_)
-    if(.mvgls_is_corrpower(refit)){
+    if(.mvgls_is_corrpower_family(refit)){
         return(as.numeric(cor_est < 0.05 || cor_est > 3))
     }
     corr_strength_max <- refit$diagnostics$corrstrength$corr_strength_max %||% NA_real_
@@ -380,6 +404,7 @@ corrpower_diagnostics <- function(object, ...) UseMethod("corrpower_diagnostics"
     if(is.null(regime_names)) regime_names <- seq_along(object$sigma$regime)
     p <- object$dims$p
     cor_param <- .mvgls_bmmcorr_cor_param_name(object)
+    has_scale <- .mvgls_bmmcorr_has_scale_param(object)
 
     rows <- lapply(regime_names, function(regime_name){
         Sigma <- object$sigma$regime[[regime_name]]
@@ -392,9 +417,8 @@ corrpower_diagnostics <- function(object, ...) UseMethod("corrpower_diagnostics"
         }, silent=TRUE)
         if(inherits(cor_vals, "try-error")) cor_vals <- rep(NA_real_, length(cov_vals))
 
-        data.frame(
+        out <- data.frame(
             reference = identical(regime_name, object$reference_regime),
-            scale = .mvgls_bmmcorr_regime_param(object, regime_name, "scale"),
             corr_strength = .mvgls_bmmcorr_regime_param(object, regime_name, cor_param),
             mean_rate = sum(diag_vals)/p,
             mean_variance = mean(diag_vals),
@@ -404,6 +428,21 @@ corrpower_diagnostics <- function(object, ...) UseMethod("corrpower_diagnostics"
             row.names = regime_name,
             stringsAsFactors = FALSE
         )
+        if(has_scale){
+            out <- data.frame(
+                reference=out$reference,
+                scale=.mvgls_bmmcorr_regime_param(object, regime_name, "scale"),
+                corr_strength=out$corr_strength,
+                mean_rate=out$mean_rate,
+                mean_variance=out$mean_variance,
+                mean_covariance=out$mean_covariance,
+                mean_correlation=out$mean_correlation,
+                mean_abs_correlation=out$mean_abs_correlation,
+                row.names=regime_name,
+                stringsAsFactors=FALSE
+            )
+        }
+        out
     })
 
     out <- do.call(rbind, rows)
@@ -450,9 +489,15 @@ corrpower_diagnostics <- function(object, ...) UseMethod("corrpower_diagnostics"
 
 .mvgls_bmmcorr_profile_interval <- function(object, regime, parameter, level=0.95, profile_points=9L){
     cor_param <- .mvgls_bmmcorr_cor_param_name(object)
-    parameter <- match.arg(parameter, c("scale", cor_param))
+    parameter_choices <- c(if(.mvgls_bmmcorr_has_scale_param(object)) "scale", cor_param)
+    parameter <- match.arg(parameter, parameter_choices)
     estimate <- .mvgls_bmmcorr_regime_param(object, regime, parameter)
     if(identical(regime, object$reference_regime)){
+        max_scale <- if(!is.null(object$regime.summary) && "scale" %in% colnames(object$regime.summary)){
+            max(object$regime.summary$scale, na.rm=TRUE)
+        }else{
+            NA_real_
+        }
         return(list(
             low=estimate,
             high=estimate,
@@ -463,7 +508,7 @@ corrpower_diagnostics <- function(object, ...) UseMethod("corrpower_diagnostics"
                 fixed_value=estimate,
                 logLik=as.numeric(object$logLik),
                 convergence=0L,
-                max_scale=max(object$regime.summary$scale, na.rm=TRUE),
+                max_scale=max_scale,
                 stringsAsFactors=FALSE
             ),
             error=NULL
@@ -526,6 +571,7 @@ corrpower_diagnostics <- function(object, ...) UseMethod("corrpower_diagnostics"
 
 .mvgls_bmmcorr_bootstrap_draws <- function(object, nboot=100L, nbcores=1L){
     cor_param <- .mvgls_bmmcorr_cor_param_name(object)
+    has_scale <- .mvgls_bmmcorr_has_scale_param(object)
     regime_names <- names(object$sigma$regime)
     if(is.null(regime_names)) regime_names <- character(0)
     draws <- .parallel_mapply(function(i){
@@ -534,18 +580,21 @@ corrpower_diagnostics <- function(object, ...) UseMethod("corrpower_diagnostics"
             refit <- .mvgls_bmmcorr_refit(object, Yp, start=object$opt$par)
             diag <- .mvgls_bmmcorr_diagnostics(refit)
             param_rows <- lapply(regime_names, function(regime){
-                scale_est <- .mvgls_bmmcorr_regime_param(refit, regime, "scale")
                 cor_est <- .mvgls_bmmcorr_regime_param(refit, regime, cor_param)
-                data.frame(
+                out <- data.frame(
                     draw=i,
                     regime=regime,
                     reference=identical(regime, refit$reference_regime),
-                    scale=scale_est,
                     corr_strength=cor_est,
                     boundary=.mvgls_bmmcorr_boundary_indicator(refit, cor_est),
-                    runaway_scale=as.numeric(is.finite(scale_est) && scale_est > 20),
                     stringsAsFactors=FALSE
                 )
+                if(has_scale){
+                    scale_est <- .mvgls_bmmcorr_regime_param(refit, regime, "scale")
+                    out$scale <- scale_est
+                    out$runaway_scale <- as.numeric(is.finite(scale_est) && scale_est > 20)
+                }
+                out
             })
             param_df <- do.call(rbind, param_rows)
             names(param_df)[names(param_df) == "corr_strength"] <- cor_param
@@ -567,12 +616,12 @@ corrpower_diagnostics <- function(object, ...) UseMethod("corrpower_diagnostics"
             draw=integer(0),
             regime=character(0),
             reference=logical(0),
-            scale=numeric(0),
             stringsAsFactors=FALSE
         )
+        if(has_scale) empty_param$scale <- numeric(0)
         empty_param[[cor_param]] <- numeric(0)
         empty_param$boundary <- numeric(0)
-        empty_param$runaway_scale <- numeric(0)
+        if(has_scale) empty_param$runaway_scale <- numeric(0)
         empty_summary <- data.frame()
         return(list(parameter_draws=empty_param, regime_summary_draws=empty_summary, n_success=0L))
     }
@@ -584,10 +633,11 @@ corrpower_diagnostics <- function(object, ...) UseMethod("corrpower_diagnostics"
 
 .mvgls_bmmcorr_parameter_summary <- function(object, level=0.95, profile_points=9L, bootstrap=NULL){
     cor_param <- .mvgls_bmmcorr_cor_param_name(object)
+    parameter_choices <- c(if(.mvgls_bmmcorr_has_scale_param(object)) "scale", cor_param)
     regime_names <- names(object$sigma$regime)
     if(is.null(regime_names)) regime_names <- character(0)
     rows <- lapply(regime_names, function(regime){
-        lapply(c("scale", cor_param), function(parameter){
+        lapply(parameter_choices, function(parameter){
             estimate <- .mvgls_bmmcorr_regime_param(object, regime, parameter)
             prof <- if(profile_points > 0L) {
                 .mvgls_bmmcorr_profile_interval(object, regime, parameter, level=level, profile_points=profile_points)
@@ -604,7 +654,7 @@ corrpower_diagnostics <- function(object, ...) UseMethod("corrpower_diagnostics"
                 boot_mean <- metric$mean
                 boot_success <- metric$n
                 if(identical(parameter, cor_param)) boundary_rate <- mean(sub$boundary, na.rm=TRUE)
-                if(identical(parameter, "scale")) runaway_rate <- mean(sub$runaway_scale, na.rm=TRUE)
+                if(identical(parameter, "scale") && "runaway_scale" %in% names(sub)) runaway_rate <- mean(sub$runaway_scale, na.rm=TRUE)
             }
             data.frame(
                 label=paste0(regime, ".", parameter),
@@ -630,7 +680,9 @@ corrpower_diagnostics <- function(object, ...) UseMethod("corrpower_diagnostics"
 .mvgls_bmmcorr_regime_summary_diagnostics <- function(object, level=0.95, bootstrap=NULL){
     info <- if(!is.null(object$regime.summary)) object$regime.summary else .mvgls_bmmcorr_regime_summary(object)
     if(is.null(info)) return(NULL)
-    metrics <- setdiff(colnames(info), c("reference", "scale", .mvgls_bmmcorr_cor_param_name(object)))
+    excluded <- c("reference", .mvgls_bmmcorr_cor_param_name(object))
+    if("scale" %in% colnames(info)) excluded <- c(excluded, "scale")
+    metrics <- setdiff(colnames(info), excluded)
     rows <- lapply(rownames(info), function(regime){
         lapply(metrics, function(metric){
             estimate <- info[regime, metric]
@@ -825,6 +877,45 @@ corrpower_diagnostics.mvgls <- function(object, level=0.95, nboot=100L, nbcores=
     results
 }
 
+corrpower_coronly_diagnostics.mvgls <- function(object, level=0.95, nboot=100L, nbcores=1L, profile_points=9L, anchors=NULL, include_bootstrap_draws=FALSE, include_anchor_fits=FALSE, ...){
+    if(!.mvgls_is_corrpower_coronly(object)){
+        stop("corrpower_coronly_diagnostics() is only implemented for mvgls fits with bmm.structure=\"corrpower_coronly\"")
+    }
+    .mvgls_bmmcorr_loglik_guard(object)
+    nboot <- as.integer(nboot[1])
+    if(is.na(nboot) || nboot < 0L) stop("'nboot' must be a non-negative integer")
+    profile_points <- as.integer(profile_points[1])
+    if(is.na(profile_points) || profile_points < 0L) stop("'profile_points' must be a non-negative integer")
+
+    bootstrap <- if(nboot > 0L) .mvgls_bmmcorr_bootstrap_draws(object, nboot=nboot, nbcores=nbcores) else NULL
+    parameter_summary <- .mvgls_bmmcorr_parameter_summary(object, level=level, profile_points=profile_points, bootstrap=bootstrap)
+    regime_summary <- .mvgls_bmmcorr_regime_summary_diagnostics(object, level=level, bootstrap=bootstrap)
+    anchor_sensitivity <- .mvgls_bmmcorr_anchor_sensitivity(object, anchors=anchors)
+    diag_info <- .mvgls_bmmcorr_diagnostics(object)
+    acceptance <- if(!is.null(anchor_sensitivity)) anchor_sensitivity$acceptance else NULL
+    if(is.null(acceptance)) acceptance <- list()
+    acceptance$selected <- diag_info$selected_start_id %||% NA_integer_
+    acceptance$boundary_corr_power <- diag_info$boundary_corr_power %||% NA
+    acceptance$regularization_corr_power <- diag_info$regularization_corr_power %||% NA
+
+    results <- list(
+        parameter_summary=parameter_summary,
+        regime_summary=regime_summary,
+        anchor_summary=if(!is.null(anchor_sensitivity)) anchor_sensitivity$anchor_summary else NULL,
+        anchor_pairwise_cov=if(!is.null(anchor_sensitivity)) anchor_sensitivity$pairwise_cov else NULL,
+        acceptance=acceptance,
+        settings=list(level=level, nboot=nboot, nbcores=nbcores, profile_points=profile_points, anchors=anchors)
+    )
+    if(include_bootstrap_draws && !is.null(bootstrap)){
+        results$bootstrap_draws <- bootstrap
+    }
+    if(include_anchor_fits && !is.null(anchor_sensitivity)){
+        results$anchor_fits <- anchor_sensitivity$fits
+    }
+    class(results) <- "corrpower_coronly_diagnostics"
+    results
+}
+
 print.corrstrength_diagnostics <- function(x, digits = max(3L, getOption("digits") - 3L), ...){
     cat("Corr-strength diagnostics\n")
     if(!is.null(x$settings)){
@@ -867,6 +958,46 @@ print.corrstrength_diagnostics <- function(x, digits = max(3L, getOption("digits
 
 print.corrpower_diagnostics <- function(x, digits = max(3L, getOption("digits") - 3L), ...){
     cat("Corr-power diagnostics\n")
+    if(!is.null(x$settings)){
+        cat("level:", round(x$settings$level, digits = digits), "\n")
+        cat("bootstrap replicates:", x$settings$nboot, "\n")
+        cat("profile points:", x$settings$profile_points, "\n\n")
+    }
+    if(is.data.frame(x$parameter_summary)){
+        display <- x$parameter_summary
+        numeric_cols <- vapply(display, is.numeric, logical(1))
+        display[numeric_cols] <- lapply(display[numeric_cols], round, digits = digits)
+        cat("parameter_summary:\n")
+        print(display, row.names=FALSE)
+        cat("\n")
+    }
+    if(is.data.frame(x$regime_summary)){
+        display <- x$regime_summary
+        numeric_cols <- vapply(display, is.numeric, logical(1))
+        display[numeric_cols] <- lapply(display[numeric_cols], round, digits = digits)
+        cat("regime_summary:\n")
+        print(display, row.names=FALSE)
+        cat("\n")
+    }
+    if(is.data.frame(x$anchor_summary)){
+        display <- x$anchor_summary
+        numeric_cols <- vapply(display, is.numeric, logical(1))
+        display[numeric_cols] <- lapply(display[numeric_cols], round, digits = digits)
+        cat("anchor_summary:\n")
+        print(display, row.names=FALSE)
+        cat("\n")
+    }
+    if(!is.null(x$acceptance)){
+        cat("Acceptance checks:\n")
+        cat("logLik spread < 5:", x$acceptance$logLik_spread_ok,
+            "(spread =", .mvgls_bmmcorr_format_value(x$acceptance$logLik_spread, digits = digits), ")\n")
+        cat("no pathological scale flags:", x$acceptance$no_pathological_scale, "\n")
+    }
+    invisible(x)
+}
+
+print.corrpower_coronly_diagnostics <- function(x, digits = max(3L, getOption("digits") - 3L), ...){
+    cat("Corr-power correlation-only diagnostics\n")
     if(!is.null(x$settings)){
         cat("level:", round(x$settings$level, digits = digits), "\n")
         cat("bootstrap replicates:", x$settings$nboot, "\n")
@@ -1695,12 +1826,21 @@ coef.mvgls <- function(object, ...){
 confint.mvgls <- function(object, parm=NULL, level=0.95, method=c("profile","bootstrap","both"), nboot=100L, nbcores=1L, profile_points=9L, ...){
     method <- match.arg(method)
     if(!.mvgls_is_bmmcorr(object)){
-        stop("confint() is only implemented for mvgls fits with bmm.structure=\"corrstrength\" or \"corrpower\"")
+        stop("confint() is only implemented for mvgls fits with bmm.structure=\"corrstrength\", \"corrpower\", or \"corrpower_coronly\"")
     }
     .mvgls_bmmcorr_loglik_guard(object)
 
     diag_obj <- if(.mvgls_is_corrpower(object)){
         corrpower_diagnostics(
+            object,
+            level=level,
+            nboot=if(identical(method, "profile")) 0L else nboot,
+            nbcores=nbcores,
+            profile_points=if(identical(method, "bootstrap")) 0L else profile_points,
+            anchors=FALSE
+        )
+    }else if(.mvgls_is_corrpower_coronly(object)){
+        corrpower_coronly_diagnostics(
             object,
             level=level,
             nboot=if(identical(method, "profile")) 0L else nboot,
