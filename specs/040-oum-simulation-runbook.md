@@ -68,13 +68,13 @@ This report is the best first summary of what the OUM simulation work already fo
 ### Minimal Check
 
 ```bash
-Rscript tests/testthat/test-mvgls-oum-covariates.R
+Rscript -e 'testthat::test_local(".", filter = "mvgls-oum-covariates", reporter = "summary")'
 ```
 
 ### Good Pre-Simulation Check
 
 ```bash
-Rscript tests/testthat/test-mvgls-oum-covariates.R
+Rscript -e 'testthat::test_local(".", filter = "mvgls-oum-covariates", reporter = "summary")'
 OUM_REC_CORES=1 OUM_REC_PHASES=focused_null OUM_REC_METHODS=LL OUM_REC_REGIMES=2 OUM_REC_BALANCE=imbalanced OUM_REC_NULL_PREDICTOR=cont_indep OUM_REC_COVARIATE_EFFECT=0.00 OUM_REC_NULL_NTIPS=60 OUM_REC_NULL_P=8 OUM_REC_NULL_ALPHA=0.50 OUM_REC_NULL_REPS=1 Rscript tests/experimental_oum_theta_recovery_grid.R
 ```
 
@@ -327,7 +327,7 @@ For larger campaigns:
 ## Common Pitfalls
 
 - Do not assume the OUM simulation scripts are lightweight; most need env restriction for quick smoke runs.
-- Do not jump straight to a large campaign before checking `tests/testthat/test-mvgls-oum-covariates.R`.
+- Do not jump straight to a large campaign before running the filtered OUM `testthat` check.
 - Do not assume the BMM experimental results automatically transfer to OUM questions; keep the workstreams conceptually separate.
 
 ## Recommended Next-Simulation Questions
@@ -335,5 +335,5 @@ For larger campaigns:
 If resuming the OUM line, the most natural next questions are:
 
 1. which OUM simulation surfaces should become lighter-weight automated regression tests
-2. whether additional high-dimensional guardrails should be enforced in code rather than only documented in simulation summaries
+2. whether additional high-dimensional guardrails should be enforced in code beyond the LL warning/stop already added for high-dimensional OUM fits
 3. whether the existing OUM scripts should get one-time-installed remote launchers similar to the corrpower campaigns

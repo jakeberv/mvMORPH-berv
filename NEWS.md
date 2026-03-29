@@ -1,6 +1,8 @@
 ## mvMORPH 1.2.1
-    + allow mvgls OUM fits to retain user-supplied covariates alongside regime optima
-    + fix type for integer in C header file
+	    + allow mvgls OUM fits to retain user-supplied covariates alongside regime optima
+	    + add OUM-specific validation/tests, clarify OUM print output, and warn/stop earlier for high-dimensional unpenalized OUM fits
+	    + retire the earlier experimental BMM "corrshrink" and "corrstrength" selectors in favor of the "corrpower" family, including the nested correlation-only mode with bmm.scale=FALSE
+	    + fix type for integer in C header file
 ## mvMORPH 1.2.0
     + update tolerance value for mvgls tuning parameter search
     + changes to Fortran routines calls following CRAN policies

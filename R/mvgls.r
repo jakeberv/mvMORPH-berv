@@ -133,7 +133,6 @@ mvgls <- function(formula, data=list(), tree, model, method=c("PL-LOOCV","LL"), 
     if(inherits(tree, "simmap")){
         if(model=="BMM") k <- ncol(tree$mapped.edge)
         if(model=="OUM") m <- ncol(tree$mapped.edge) + sum(assign.formula != 0)
-        # TODO handle cases with covariate for OUM
     }else k <- NULL
     if(method=="LL") penalized=FALSE else penalized=TRUE
     

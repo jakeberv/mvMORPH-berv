@@ -16,7 +16,7 @@ This spec summarizes what has already been validated in the merged fork and what
 
 Validated locally through:
 
-- `tests/testthat/test-mvgls-oum-covariates.R`
+- the filtered `testthat` check for `tests/testthat/test-mvgls-oum-covariates.R`
 
 Supported by larger simulation harnesses and reports:
 
@@ -110,7 +110,7 @@ If starting a new feature branch, a good lightweight confidence pass is:
 
 1. `Rscript tests/experimental_corrpower_mvgls.R`
 2. `Rscript tests/experimental_corrpower_coronly_mvgls.R`
-3. `Rscript tests/testthat/test-mvgls-oum-covariates.R`
+3. `Rscript -e 'testthat::test_local(".", filter = "mvgls-oum-covariates", reporter = "summary")'`
 
 If working on the corrpower fitter or diagnostics, also run:
 
