@@ -40,6 +40,184 @@
     tree
 }
 
+.mvSIMMAP_extract_control <- function(control){
+    if(is.null(control)) control <- list()
+    special_defaults <- list(
+        hessian.tol=1e-6,
+        retry.unreliable=FALSE,
+        retry.max=3L,
+        retry.jitter=0.05,
+        retry.seed=NULL
+    )
+    special_names <- names(special_defaults)
+    special <- special_defaults
+    if(length(control)){
+        for(name in intersect(names(control), special_names)){
+            special[[name]] <- control[[name]]
+        }
+    }
+    optimizer <- if(length(control)){
+        control[setdiff(names(control), special_names)]
+    }else{
+        list()
+    }
+    special$hessian.tol <- as.numeric(special$hessian.tol)[1]
+    if(!is.finite(special$hessian.tol)) special$hessian.tol <- special_defaults$hessian.tol
+    special$hessian.tol <- max(0, special$hessian.tol)
+    special$retry.unreliable <- isTRUE(as.logical(special$retry.unreliable))
+    special$retry.max <- as.integer(special$retry.max)[1]
+    if(is.na(special$retry.max)) special$retry.max <- special_defaults$retry.max
+    special$retry.max <- max(0L, special$retry.max)
+    special$retry.jitter <- as.numeric(special$retry.jitter)[1]
+    if(!is.finite(special$retry.jitter)) special$retry.jitter <- special_defaults$retry.jitter
+    special$retry.jitter <- max(0, special$retry.jitter)
+    special$retry.seed <- if(is.null(special$retry.seed)) NULL else as.integer(special$retry.seed)[1]
+    list(optimizer=optimizer, special=special)
+}
+
+.mvSIMMAP_with_seed <- function(seed, expr){
+    if(is.null(seed)) return(eval.parent(substitute(expr)))
+    has_seed <- exists(".Random.seed", envir=.GlobalEnv, inherits=FALSE)
+    if(has_seed){
+        old_seed <- get(".Random.seed", envir=.GlobalEnv, inherits=FALSE)
+    }
+    on.exit({
+        if(has_seed){
+            assign(".Random.seed", old_seed, envir=.GlobalEnv)
+        }else if(exists(".Random.seed", envir=.GlobalEnv, inherits=FALSE)){
+            rm(".Random.seed", envir=.GlobalEnv)
+        }
+    }, add=TRUE)
+    set.seed(seed)
+    eval.parent(substitute(expr))
+}
+
+.mvSIMMAP_status_rank <- function(status){
+    switch(status,
+        "reliable" = 3L,
+        "flat" = 2L,
+        "saddle" = 1L,
+        "unavailable" = 0L,
+        0L
+    )
+}
+
+.mvSIMMAP_hessian_diagnostic <- function(hessian, tolerance=1e-6){
+    values <- try(Re(eigen(hessian, only.values=TRUE)$values), silent=TRUE)
+    if(is.null(hessian) || inherits(values, "try-error") || !length(values) || any(!is.finite(values))){
+        return(list(
+            code=1L,
+            status="unavailable",
+            label="check solution (Hessian unavailable)",
+            message="unreliable solution has been reached, Hessian check unavailable",
+            eigenvalues=NA_real_,
+            tolerance=tolerance,
+            scaled.tolerance=NA_real_,
+            min.eigenvalue=NA_real_,
+            nnegative=NA_integer_,
+            nflat=NA_integer_
+        ))
+    }
+    scale <- max(1, max(abs(values)))
+    scaled_tol <- tolerance * scale
+    nnegative <- sum(values < -scaled_tol)
+    nflat <- sum(abs(values) <= scaled_tol)
+    if(nnegative > 0L){
+        status <- "saddle"
+        label <- "check solution (saddle point suspected)"
+        message <- "unreliable solution has been reached, saddle point suspected"
+    }else if(nflat > 0L){
+        status <- "flat"
+        label <- "nearly flat/boundary"
+        message <- "solution is nearly flat or on a parameter boundary; check solution"
+    }else{
+        status <- "reliable"
+        label <- "reliable"
+        message <- "a reliable solution has been reached"
+    }
+    list(
+        code=if(status == "reliable") 0L else 1L,
+        status=status,
+        label=label,
+        message=message,
+        eigenvalues=values,
+        tolerance=tolerance,
+        scaled.tolerance=scaled_tol,
+        min.eigenvalue=min(values),
+        nnegative=nnegative,
+        nflat=nflat
+    )
+}
+
+.mvSIMMAP_jitter_start <- function(par, amount, lower=NULL, upper=NULL){
+    if(!length(par) || amount <= 0) return(par)
+    scale <- pmax(abs(par), 1)
+    out <- par + stats::rnorm(length(par), sd=scale * amount)
+    if(!is.null(lower)) out <- pmax(out, lower)
+    if(!is.null(upper)) out <- pmin(out, upper)
+    out[!is.finite(out)] <- par[!is.finite(out)]
+    out
+}
+
+.mvSIMMAP_optimize_once <- function(start, objective, optimization, control,
+                                    beta_idx=integer(0), beta_low=numeric(0), beta_up=numeric(0)){
+    if(optimization == "subplex"){
+        return(subplex(par=start, fn=objective, hessian=TRUE, control=control))
+    }
+    if(optimization == "L-BFGS-B" && length(beta_idx)){
+        lower <- rep(-Inf, length(start))
+        upper <- rep(Inf, length(start))
+        lower[beta_idx] <- beta_low
+        upper[beta_idx] <- beta_up
+        return(optim(
+            par=start,
+            fn=objective,
+            method=optimization,
+            lower=lower,
+            upper=upper,
+            hessian=TRUE,
+            control=control
+        ))
+    }
+    optim(
+        par=start,
+        fn=objective,
+        method=optimization,
+        hessian=TRUE,
+        control=control
+    )
+}
+
+.mvSIMMAP_choose_fit <- function(candidates){
+    stopifnot(length(candidates) > 0L)
+    if(length(candidates) == 1L) return(candidates[[1]])
+    best <- candidates[[1]]
+    best_rank <- .mvSIMMAP_status_rank(best$hessian$status)
+    for(i in 2:length(candidates)){
+        cand <- candidates[[i]]
+        cand_rank <- .mvSIMMAP_status_rank(cand$hessian$status)
+        take <- FALSE
+        if(cand_rank > best_rank){
+            take <- TRUE
+        }else if(cand_rank == best_rank){
+            cand_conv <- isTRUE(cand$estim$convergence == 0)
+            best_conv <- isTRUE(best$estim$convergence == 0)
+            if(cand_conv && !best_conv){
+                take <- TRUE
+            }else if(identical(cand_conv, best_conv) &&
+                      is.finite(cand$estim$value) &&
+                      (!is.finite(best$estim$value) || cand$estim$value < best$estim$value)){
+                take <- TRUE
+            }
+        }
+        if(take){
+            best <- cand
+            best_rank <- cand_rank
+        }
+    }
+    best
+}
+
 .mvSIMMAP_safe_inverse <- function(x){
     inv <- try(solve(x), silent=TRUE)
     if(inherits(inv, "try-error")){
@@ -435,6 +613,30 @@
     )
 }
 
+.mvSIMMAP_format_beta <- function(beta, zero_tol=100 * sqrt(.Machine$double.eps)){
+    if(!length(beta)) return(beta)
+    out <- data.frame(
+        process.group=names(beta),
+        beta=as.numeric(beta),
+        check.names=FALSE,
+        stringsAsFactors=FALSE
+    )
+    note <- ifelse(abs(beta) <= zero_tol, "BM boundary", "")
+    if(any(nzchar(note))){
+        out$note <- note
+    }
+    out
+}
+
+.mvSIMMAP_make_logLik <- function(value, df, nobs){
+    structure(
+        as.numeric(value),
+        class="logLik",
+        df=as.integer(df),
+        nobs=as.integer(nobs)
+    )
+}
+
 .mvSIMMAP_print_object <- function(x){
     cat("\n")
     cat("-- Summary results for the experimental SIMMAP mixed model --", "\n")
@@ -446,6 +648,24 @@
     if(!is.null(x$AIC)) cat("AIC:\t", x$AIC, "\n")
     if(!is.null(x$AICc)) cat("AICc:\t", x$AICc, "\n")
     if(!is.null(x$param[["nparam"]])) cat(x$param$nparam, "parameters", "\n")
+    if(!is.null(x$diagnostics$hessian$label)){
+        cat("Hessian:\t", x$diagnostics$hessian$label, "\n")
+    }
+    if(isTRUE((x$diagnostics$retries$attempted %||% 0L) > 0L)){
+        cat(
+            "Refits:\t",
+            x$diagnostics$retries$attempted,
+            " jittered restart",
+            if((x$diagnostics$retries$attempted %||% 0L) == 1L) "" else "s",
+            if(isTRUE(x$diagnostics$retries$selected.from.retry)) {
+                paste0("; retained retry ", x$diagnostics$retries$selected.attempt)
+            } else {
+                "; retained initial fit"
+            },
+            "\n",
+            sep=""
+        )
+    }
     cat("Regime summary", "\n")
     cat("______________________", "\n")
     print(.mvSIMMAP_regime_summary(x$process, x$process.groups), row.names=FALSE)
@@ -471,7 +691,7 @@
         cat("\n")
         cat("EB beta values (by process group)", "\n")
         cat("______________________", "\n")
-        print(x$beta)
+        print(.mvSIMMAP_format_beta(x$beta), row.names=FALSE)
     }
     invisible(x)
 }
@@ -488,7 +708,11 @@
         AIC=object$AIC %||% NA_real_,
         AICc=object$AICc %||% NA_real_,
         convergence=object$convergence %||% NA_integer_,
-        hessian_ok=if(!is.null(object$hess.values)) identical(object$hess.values, 0) else NA
+        hessian_ok=if(!is.null(object$hess.values)) identical(object$hess.values, 0) else NA,
+        hessian_status=object$diagnostics$hessian$label %||% NA_character_,
+        refit_attempted=object$diagnostics$retries$attempted %||% 0L,
+        refit_selected=object$diagnostics$retries$selected.attempt %||% NA_integer_,
+        refit_from_retry=isTRUE(object$diagnostics$retries$selected.from.retry)
     )
     dims <- list(
         n=object$param$nbspecies %||% NA_integer_,
@@ -529,8 +753,25 @@
         if(!is.na(x$fit$convergence)){
             cat("Convergence:\t", if(x$fit$convergence == 0) "successful" else "not converged", "\n")
         }
-        if(!is.na(x$fit$hessian_ok)){
+        if(!is.na(x$fit$hessian_status)){
+            cat("Hessian:\t", x$fit$hessian_status, "\n")
+        }else if(!is.na(x$fit$hessian_ok)){
             cat("Hessian:\t", if(isTRUE(x$fit$hessian_ok)) "reliable" else "check solution", "\n")
+        }
+        if(isTRUE(x$fit$refit_attempted > 0L)){
+            cat(
+                "Refits:\t",
+                x$fit$refit_attempted,
+                " jittered restart",
+                if(x$fit$refit_attempted == 1L) "" else "s",
+                if(isTRUE(x$fit$refit_from_retry)) {
+                    paste0("; retained retry ", x$fit$refit_selected)
+                } else {
+                    "; retained initial fit"
+                },
+                "\n",
+                sep=""
+            )
         }
     }else{
         cat("Fit status:\tdefault parameterization only (optimization=\"fixed\")", "\n")
@@ -580,6 +821,9 @@ mvSIMMAP <- function(tree, data, process, process.groups=NULL, error=NULL,
         stop("mvSIMMAP currently supports only the \"rpf\", \"inverse\", and \"pseudoinverse\" methods", call.=FALSE)
     }
     optimization <- optimization[1]
+    control_settings <- .mvSIMMAP_extract_control(control)
+    optimizer_control <- control_settings$optimizer
+    special_control <- control_settings$special
     p <- ncol(data)
     if(is.null(p)) p <- 1L
     n <- nrow(data)
@@ -821,6 +1065,7 @@ mvSIMMAP <- function(tree, data, process, process.groups=NULL, error=NULL,
         param$mean.parameters <- mean_names
         param$alphafun <- alphafun
         param$sigmafun <- sigmafun
+        param$control.special <- special_control
         results <- list(
             llik=llfun,
             theta=theta_zero,
@@ -829,6 +1074,15 @@ mvSIMMAP <- function(tree, data, process, process.groups=NULL, error=NULL,
             beta=values$beta,
             process=process,
             process.groups=process_groups,
+            diagnostics=list(
+                hessian=NULL,
+                retries=list(
+                    enabled=special_control$retry.unreliable,
+                    attempted=0L,
+                    selected.attempt=0L,
+                    selected.from.retry=FALSE
+                )
+            ),
             param=param
         )
         class(results) <- c("mvmorph.mixed", "mvmorph")
@@ -840,38 +1094,84 @@ mvSIMMAP <- function(tree, data, process, process.groups=NULL, error=NULL,
         logl <- eval_loglik(par, theta_mle=TRUE)$logl
         if(!is.finite(logl)) .Machine$double.xmax/100 else -logl
     }
-    if(optimization == "subplex"){
-        estim <- subplex(par=start, fn=objective, hessian=TRUE, control=control)
-    }else if(optimization == "L-BFGS-B" && length(beta_idx)){
-        lower <- rep(-Inf, length(start))
-        upper <- rep(Inf, length(start))
-        lower[beta_idx] <- beta_low[names(beta_start)]
-        upper[beta_idx] <- beta_up[names(beta_start)]
-        estim <- optim(
-            par=start,
-            fn=objective,
-            method=optimization,
-            lower=lower,
-            upper=upper,
-            hessian=TRUE,
-            control=control
-        )
-    }else{
-        estim <- optim(
-            par=start,
-            fn=objective,
-            method=optimization,
-            hessian=TRUE,
-            control=control
-        )
+    beta_lower <- beta_low[names(beta_start)]
+    beta_upper <- beta_up[names(beta_start)]
+    initial_fit <- .mvSIMMAP_optimize_once(
+        start=start,
+        objective=objective,
+        optimization=optimization,
+        control=optimizer_control,
+        beta_idx=beta_idx,
+        beta_low=beta_lower,
+        beta_up=beta_upper
+    )
+    initial_hessian <- .mvSIMMAP_hessian_diagnostic(
+        initial_fit$hessian,
+        tolerance=special_control$hessian.tol
+    )
+    fit_candidates <- list(list(
+        estim=initial_fit,
+        hessian=initial_hessian,
+        attempt=0L,
+        retry=FALSE
+    ))
+    retry_log <- list(
+        enabled=special_control$retry.unreliable,
+        attempted=0L,
+        selected.attempt=0L,
+        selected.from.retry=FALSE,
+        statuses=setNames(initial_hessian$status, "initial")
+    )
+    needs_retry <- isTRUE(special_control$retry.unreliable) &&
+        special_control$retry.max > 0L &&
+        (initial_fit$convergence != 0 || initial_hessian$status != "reliable")
+    if(needs_retry){
+        lower_bounds <- upper_bounds <- NULL
+        if(optimization == "L-BFGS-B" && length(beta_idx)){
+            lower_bounds <- rep(-Inf, length(start))
+            upper_bounds <- rep(Inf, length(start))
+            lower_bounds[beta_idx] <- beta_lower
+            upper_bounds[beta_idx] <- beta_upper
+        }
+        retry_candidates <- .mvSIMMAP_with_seed(special_control$retry.seed, lapply(seq_len(special_control$retry.max), function(i){
+            jittered_start <- .mvSIMMAP_jitter_start(
+                initial_fit$par,
+                amount=special_control$retry.jitter,
+                lower=lower_bounds,
+                upper=upper_bounds
+            )
+            estim_i <- .mvSIMMAP_optimize_once(
+                start=jittered_start,
+                objective=objective,
+                optimization=optimization,
+                control=optimizer_control,
+                beta_idx=beta_idx,
+                beta_low=beta_lower,
+                beta_up=beta_upper
+            )
+            list(
+                estim=estim_i,
+                hessian=.mvSIMMAP_hessian_diagnostic(
+                    estim_i$hessian,
+                    tolerance=special_control$hessian.tol
+                ),
+                attempt=i,
+                retry=TRUE
+            )
+        }))
+        fit_candidates <- c(fit_candidates, retry_candidates)
+        retry_log$attempted <- length(retry_candidates)
+        retry_status <- vapply(retry_candidates, function(x) x$hessian$status, character(1))
+        names(retry_status) <- paste0("retry", seq_along(retry_candidates))
+        retry_log$statuses <- c(retry_log$statuses, retry_status)
     }
+    selected_fit <- .mvSIMMAP_choose_fit(fit_candidates)
+    retry_log$selected.attempt <- selected_fit$attempt
+    retry_log$selected.from.retry <- isTRUE(selected_fit$retry)
+    estim <- selected_fit$estim
+    hessian_info <- selected_fit$hessian
     res.theta <- eval_loglik(estim$par, theta_mle=TRUE)$theta
-    hessian_vals <- try(eigen(estim$hessian)$values, silent=TRUE)
-    if(inherits(hessian_vals, "try-error")){
-        hess.val <- 1
-    }else{
-        hess.val <- if(any(Re(hessian_vals) < 0)) 1 else 0
-    }
+    hess.val <- hessian_info$code
     if(isTRUE(diagnostic)){
         if(estim$convergence == 0){
             cat("successful convergence of the optimizer", "\n")
@@ -880,15 +1180,27 @@ mvSIMMAP <- function(tree, data, process, process.groups=NULL, error=NULL,
         }else{
             cat("convergence of the optimizer has not been reached, try simpler model", "\n")
         }
-        if(hess.val == 0){
-            cat("a reliable solution has been reached", "\n")
-        }else{
-            cat("unreliable solution has been reached, check hessian eigenvectors or try simpler model", "\n")
+        if(isTRUE(retry_log$attempted > 0L)){
+            cat(
+                "performed ",
+                retry_log$attempted,
+                " jittered restart",
+                if(retry_log$attempted == 1L) "" else "s",
+                if(isTRUE(retry_log$selected.from.retry)) {
+                    paste0("; retained retry ", retry_log$selected.attempt)
+                } else {
+                    "; retained initial fit"
+                },
+                "\n",
+                sep=""
+            )
         }
+        cat(hessian_info$message, "\n")
     }
     LL <- -estim$value
     nparam <- length(estim$par) + sizeD
     nobs <- length(which(!is.na(data)))
+    logLik_obj <- .mvSIMMAP_make_logLik(LL, df=nparam, nobs=nobs)
     AIC <- -2 * LL + 2 * nparam
     AICc <- AIC + ((2 * nparam * (nparam + 1))/(nobs - nparam - 1))
     fitted_values <- .mvSIMMAP_unpack(estim$par, spec)
@@ -912,6 +1224,7 @@ mvSIMMAP <- function(tree, data, process, process.groups=NULL, error=NULL,
     param$ntraits <- p
     param$nregimes <- length(regime_names)
     param$nprocess.groups <- length(group_names)
+    param$nobs <- nobs
     param$method <- method
     param$optimization <- optimization
     param$traits <- trait_names
@@ -925,9 +1238,10 @@ mvSIMMAP <- function(tree, data, process, process.groups=NULL, error=NULL,
     param$mean.parameters <- mean_names
     param$alphafun <- alphafun
     param$sigmafun <- sigmafun
+    param$control.special <- special_control
     param$opt <- estim
     results <- list(
-        LogLik=LL,
+        LogLik=logLik_obj,
         AIC=AIC,
         AICc=AICc,
         theta=theta.mat,
@@ -938,6 +1252,10 @@ mvSIMMAP <- function(tree, data, process, process.groups=NULL, error=NULL,
         process.groups=process_groups,
         convergence=estim$convergence,
         hess.values=hess.val,
+        diagnostics=list(
+            hessian=hessian_info,
+            retries=retry_log
+        ),
         param=param,
         llik=llfun
     )

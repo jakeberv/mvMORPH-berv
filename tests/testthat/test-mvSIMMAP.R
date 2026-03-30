@@ -344,3 +344,97 @@ test_that("mvSIMMAP summary method returns a compact structural summary", {
     expect_match(out, "Regime summary")
     expect_match(out, "theta:\\ttheta\\.A, theta\\.B")
 })
+
+test_that("mvSIMMAP Hessian diagnostics distinguish reliable, flat, and saddle solutions", {
+    reliable <- mvMORPH:::.mvSIMMAP_hessian_diagnostic(diag(c(2, 1)), tolerance=1e-6)
+    flat <- mvMORPH:::.mvSIMMAP_hessian_diagnostic(diag(c(1, 1e-9)), tolerance=1e-6)
+    saddle <- mvMORPH:::.mvSIMMAP_hessian_diagnostic(diag(c(1, -1e-2)), tolerance=1e-6)
+
+    expect_identical(reliable$status, "reliable")
+    expect_identical(reliable$code, 0L)
+    expect_identical(flat$status, "flat")
+    expect_identical(flat$code, 1L)
+    expect_match(flat$label, "flat")
+    expect_identical(saddle$status, "saddle")
+    expect_identical(saddle$code, 1L)
+    expect_match(saddle$label, "saddle")
+})
+
+test_that("mvSIMMAP can retry unreliable fits and reports the retained status", {
+    set.seed(19)
+    tree <- make_single_regime_simmap(ape::rtree(8), regime="A")
+    X <- matrix(rnorm(ape::Ntip(tree) * 2), ncol=2)
+    rownames(X) <- tree$tip.label
+
+    fit <- mvSIMMAP(
+        tree, X,
+        process=c(A="OU"),
+        method="inverse",
+        optimization="L-BFGS-B",
+        control=list(
+            maxit=25,
+            hessian.tol=1e9,
+            retry.unreliable=TRUE,
+            retry.max=1,
+            retry.jitter=0.01,
+            retry.seed=1
+        ),
+        diagnostic=FALSE,
+        echo=FALSE
+    )
+
+    expect_true(is.list(fit$diagnostics))
+    expect_identical(fit$diagnostics$retries$attempted, 1L)
+    expect_identical(fit$diagnostics$hessian$status, "flat")
+    expect_identical(fit$hess.values, 1L)
+
+    sum_fit <- summary(fit)
+    out <- paste(capture.output(print(sum_fit)), collapse="\n")
+    expect_match(out, "Hessian:\\t\\s*nearly flat/boundary")
+    expect_match(out, "Refits:\\t1 jittered restart")
+})
+
+test_that("mvSIMMAP print annotates EB rates at the BM boundary", {
+    tree <- make_single_regime_simmap(ape::rtree(6), regime="A")
+    X <- matrix(rnorm(ape::Ntip(tree)), ncol=1)
+    rownames(X) <- tree$tip.label
+
+    fit <- mvSIMMAP(
+        tree, X,
+        process=c(A="EB"),
+        method="inverse",
+        optimization="fixed",
+        echo=FALSE
+    )
+    fit$beta[] <- 0
+
+    out <- paste(capture.output(print(fit)), collapse="\n")
+    expect_match(out, "BM boundary")
+    expect_match(out, "process\\.group")
+})
+
+test_that("mvSIMMAP optimized fits expose a standards-compatible logLik object", {
+    set.seed(20)
+    tree <- make_single_regime_simmap(ape::rtree(8), regime="A")
+    X <- matrix(rnorm(ape::Ntip(tree)), ncol=1)
+    rownames(X) <- tree$tip.label
+
+    fit <- mvSIMMAP(
+        tree, X,
+        process=c(A="OU"),
+        method="inverse",
+        optimization="L-BFGS-B",
+        control=list(maxit=30),
+        diagnostic=FALSE,
+        echo=FALSE
+    )
+
+    expect_s3_class(fit$LogLik, "logLik")
+    expect_identical(attr(fit$LogLik, "df"), as.integer(fit$param$nparam))
+    expect_identical(attr(fit$LogLik, "nobs"), as.integer(fit$param$nobs))
+    expect_equal(as.numeric(logLik(fit)), as.numeric(fit$LogLik))
+
+    bic_expected <- -2 * as.numeric(fit$LogLik) +
+        log(attr(fit$LogLik, "nobs")) * attr(fit$LogLik, "df")
+    expect_equal(as.numeric(BIC(fit)), bic_expected)
+})

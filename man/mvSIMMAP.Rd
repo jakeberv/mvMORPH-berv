@@ -46,7 +46,7 @@ Whether the tree should be scaled to unit height before fitting.
 Optimization routine. The special value \code{"fixed"} returns only the log-likelihood function and starting-value parameterization.
 }
   \item{control}{
-Control list passed to the optimizer.
+Control list passed to the optimizer. In addition to the optimizer's own entries, \code{mvSIMMAP} recognizes \code{hessian.tol} for the post-fit Hessian tolerance, \code{retry.unreliable} to enable automatic jittered restarts when the first fit converges to an unreliable or nearly flat solution, \code{retry.max} for the number of such restarts, \code{retry.jitter} for the relative amount of start-value perturbation, and \code{retry.seed} for reproducible restart draws. These special entries are stripped before the remaining control list is sent to the optimizer.
 }
   \item{diagnostic}{
 Whether convergence diagnostics are printed.
@@ -62,10 +62,12 @@ The current implementation is experimental and is designed around \code{mvMORPH}
 
 By default, each painted regime gets its own dynamic parameter block. Supplying \code{process.groups} allows multiple painted regimes to share the same dynamic OU, OUM, BM, or EB parameters. The fitted mean parameters always include a root-state vector. For \code{"OU"}, each process group contributes a single optimum vector, so grouped painted regimes are collapsed into one OU regime for the likelihood. For \code{"OUM"}, each painted regime contributes its own optimum vector even when several regimes share the same OU dynamics. BM and EB regimes contribute only covariance/process parameters.
 
-Printed model objects show the estimated parameter matrices in detail. Calling \code{summary()} on a fitted \code{mvSIMMAP} object gives a more compact structural view listing the painted regimes, process groups, theta ownership, and the names of the estimated parameter blocks.
+Printed model objects show the estimated parameter matrices in detail. Calling \code{summary()} on a fitted \code{mvSIMMAP} object gives a more compact structural view listing the painted regimes, process groups, theta ownership, and the names of the estimated parameter blocks. EB beta values printed at or extremely near zero are annotated as the BM boundary for readability.
+
+The post-fit Hessian check is slightly more informative than the older binary \code{mvMORPH} diagnostic used in some other fitters. Tiny negative eigenvalues inside \code{hessian.tol} are treated as numerical noise, nearly zero eigenvalues are reported as a flat or boundary solution, and clearly negative eigenvalues are reported as a possible saddle point. When \code{retry.unreliable = TRUE}, the function can automatically try a small number of jittered restarts and keep the best retained solution.
 }
 \value{
-\item{LogLik }{The log-likelihood of the fitted model.}
+\item{LogLik }{The log-likelihood of the fitted model, stored as a standard \code{"logLik"} object with \code{df} and \code{nobs} attributes for compatibility with generic comparison tools such as \code{BIC()}.}
 \item{AIC }{Akaike Information Criterion.}
 \item{AICc }{Sample size-corrected AIC.}
 \item{theta }{Estimated mean parameters, including the root state and any OU/OUM optimum vectors.}
@@ -75,7 +77,8 @@ Printed model objects show the estimated parameter matrices in detail. Calling \
 \item{process }{The normalized regime-to-process assignment vector used in the fit.}
 \item{process.groups }{The normalized regime-to-process-group assignment vector used in the fit.}
 \item{convergence }{Convergence status of the optimizing function.}
-\item{hess.values }{Basic Hessian reliability diagnostic.}
+\item{hess.values }{Compatibility-friendly binary Hessian diagnostic: \code{0} for reliable and \code{1} otherwise.}
+\item{diagnostics }{Detailed post-fit diagnostics, including Hessian status, eigenvalue summary, and any automatic restart information.}
 \item{param }{List of fit metadata and internal parameterization functions.}
 \item{llik }{The corresponding log-likelihood function.}
 }
