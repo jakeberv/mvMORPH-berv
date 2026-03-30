@@ -33,6 +33,8 @@ This is a forward-looking design note. The currently implemented public mixed-pr
 - `mvSIMMAP(..., data = NULL, optimization = "fixed", param = list(ntraits = ...))` can now act as a simulation scaffold for mixed-process SIMMAP models.
 - For `OU`, shared `process.groups` collapse painted regimes into one OU regime for the likelihood, with shared `alpha`, `sigma`, and `theta`.
 - For `OUM`, shared `process.groups` share OU dynamics while retaining painted-regime-specific optima.
+- The practical standalone default for OU/OUM groups is now `decomp = "scalarPositive"`, so each OU/OUM process group gets one positive pull parameter unless the user opts into a richer `alpha` structure.
+- The standalone mixed fitter currently uses a fixed-root-style mean structure with one global root vector estimated by GLS; broader `mvOU`-style `root` / `vcv` options are not yet part of the mixed-process API.
 - Internally, `mvSIMMAP()` builds a dense vectorized design matrix `D` and a dense covariance matrix `V`, then evaluates the likelihood through `loglik_mvmorph()`.
 - Optimized `mvSIMMAP()` fits now expose `LogLik` as a standard `logLik` object, so generic tools like `BIC()` work without changing the wider `mvMORPH` comparison machinery.
 - Fitted objects now also carry richer post-fit diagnostics, including Hessian status labels and optional jittered-restart metadata.

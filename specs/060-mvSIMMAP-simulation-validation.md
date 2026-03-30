@@ -65,8 +65,10 @@ All matched-tree recovery runs summarized below used the same basic tree and reg
 Common fitting settings:
 
 - `optimization = "L-BFGS-B"`
-- `param = list(decomp = "diagonalPositive", decompSigma = "cholesky")`
+- `param = list(decomp = "diagonalPositive", decompSigma = "cholesky")` for the first-pass BM/OU benchmark campaign summarized below
 - `control = list(maxit = 500, retry.unreliable = TRUE, retry.max = 2, retry.jitter = 0.05, retry.seed = 1)`
+
+Later in the same workstream, the public `mvSIMMAP()` default for OU/OUM alpha blocks was changed from the earlier diagonal-alpha default to `decomp = "scalarPositive"`. That newer default fits one positive pull parameter per OU/OUM process group and is discussed in the shared-OUM benchmark notes below.
 
 Common simulation pattern:
 
@@ -268,25 +270,72 @@ Interpretation:
 - the main signal is not a small penalty tradeoff but a large log-likelihood gain that overwhelms the mixed model's extra parameters
 - the benchmark driver now reports this comparison directly alongside parameter-recovery summaries
 
+### 3D exact-tree shared-OUM benchmark and `scalarPositive` default
+
+A more complex exact-tree benchmark was then added with three painted regimes on a 100-tip pure-birth tree:
+
+- background regime `A = BM`
+- derived regime `B = OUM`
+- derived regime `C = OUM`
+- `B` and `C` share OU dynamics through `process.groups = c(A = "A", B = "ou_shared", C = "ou_shared")`
+- `B` and `C` keep separate optima (`theta.B` and `theta.C`)
+
+The benchmark compares:
+
+- the generating shared-dynamics mixed model
+- a separate-dynamics mixed model with distinct OU blocks for `B` and `C`
+- painted `BMM`
+- global `BM1`
+
+On the first 4-replicate exact-tree batch with the older `diagonalPositive` alpha decomposition:
+
+- mean `AIC_shared = -687.1784`
+- mean `AIC_separate = -681.0481`
+- mean `delta_AIC_separate_minus_shared = 6.1304`
+- mean two-model Akaike weight for the shared model over the separate mixed alternative was `0.8831`
+- all shared and separate mixed fits converged with reliable Hessians
+
+On the same 4-replicate batch with the newer `scalarPositive` alpha decomposition:
+
+- mean `AIC_shared = -689.0541`
+- mean `AIC_separate = -683.4360`
+- mean `delta_AIC_separate_minus_shared = 5.6180`
+- mean two-model Akaike weight for the shared model over the separate mixed alternative was `0.8992`
+- runtime dropped from about `771.8` seconds to about `332.6` seconds on 4 cores
+- all shared and separate mixed fits again converged with reliable Hessians
+
+Interpretation:
+
+- the more regularized `scalarPositive` alpha model was much faster in this shared-OUM benchmark
+- it remained fully competitive by AIC and was actually slightly better on average than the richer diagonal-alpha fit
+- it improved the hardest overestimated alpha dimension from the diagonal fit, even though it necessarily forces all traitwise OU pull strengths within a process group to be equal
+- this result motivated changing the public default OU/OUM alpha parameterization to `scalarPositive`
+
 ## What We Have Learned So Far
 
 ### Estimation behavior
 
 - Exact matched-tree recovery is clearly viable for the current standalone `mvSIMMAP()` implementation.
+- The current mixed fitter uses one global GLS-estimated root vector, corresponding to the fixed-root side of the older `mvOU` semantics rather than the stationary/random-root variants.
 - In the canonical mixed `BM -> OU` simulation, the fitted mixed model is decisively favored over a global `BM1` alternative by AIC.
+- In the more complex shared-OUM benchmark, the generating shared-dynamics model is recoverable and is favored over both all-BM alternatives and a separate-dynamics mixed alternative.
 - The easiest parameters to recover in these local checks were:
   - `theta`
   - background `BM` covariance terms
 - Derived-regime `OU` covariance terms were somewhat biased upward but still broadly informative.
 - Derived-regime `OU` pull parameters (`alpha`) were consistently the hardest parameters to recover.
+- A scalar OU/OUM pull parameterization (`alpha = a I` by process group) can be a very good default compromise: much faster, often more stable, and sometimes even slightly better by AIC than a richer diagonal-alpha fit.
 - Increasing trait dimension helped some `alpha` components, but did not remove the classic `alpha` / `sigma` confounding ridge.
 
 ### Practical workflow
 
 - `mvSIMMAP(..., data = NULL, optimization = "fixed")` is good enough to serve as a simulation scaffold.
 - `simulate(mvSIMMAP_object, param = list(...))` is sufficient for exact-tree validation loops.
+- When comparing pure OU/OUM overlap cases to the legacy fitter, interpret the current mixed path as `mvOU(..., root=TRUE, vcv="fixedRoot")`.
 - `tests/experimental_mvsimmap_recovery_benchmark.R` can now rerun the canonical 3D exact-tree benchmark directly, with env overrides for method, trait count, replicate count, and output directory.
+- `tests/experimental_mvsimmap_recovery_benchmark.R` now also accepts `MVSIMMAP_BENCH_ALPHA_DECOMP`, defaulting to the public `scalarPositive` alpha setting.
 - That benchmark driver now includes a built-in global `BM1` baseline and prints per-replicate and summary AIC comparisons.
+- `tests/experimental_mvsimmap_shared_ou_benchmark.R` provides a reusable 3-regime shared-OUM benchmark and accepts `MVSIMMAP_SHARED_BENCH_ALPHA_DECOMP`, defaulting to `scalarPositive`.
 - The new compact multivariate summary output is useful for debugging and for reading 2D/3D fits without digging through raw matrices.
 - `parameters(fit)` is useful for flattening multivariate estimates into a simulation-summary table; `fit$sigma`, `fit$alpha`, and `coef(fit)` remain the right interfaces when full matrices are desired.
 
@@ -304,12 +353,13 @@ For future local `mvSIMMAP()` simulation checks:
 
 1. Start with exact matched-tree validation before adding tree misspecification.
 2. Prefer `method = "rpf"` unless there is a specific numerical reason to use `inverse` or `pseudoinverse`.
-3. Record all of:
+3. Prefer the default `decomp = "scalarPositive"` for OU/OUM alpha blocks unless a richer alpha structure clearly wins by AIC or is required by the scientific question.
+4. Record all of:
    - convergence
    - Hessian status
    - per-parameter bias and RMSE
-4. Pay particular attention to the derived-regime `alpha` / `sigma` relationship rather than interpreting `alpha` in isolation.
-5. Use a reasonably large and deep derived clade when testing OU recovery; tiny derived clades are too easy to mistake for algorithmic failure when the issue is really weak information.
+5. Pay particular attention to the derived-regime `alpha` / `sigma` relationship rather than interpreting `alpha` in isolation.
+6. Use a reasonably large and deep derived clade when testing OU recovery; tiny derived clades are too easy to mistake for algorithmic failure when the issue is really weak information.
 
 ## Main Remaining Open Questions
 

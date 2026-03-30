@@ -97,6 +97,8 @@ Current public mixed-process SIMMAP path:
 
 - `mvSIMMAP(tree, data, process, process.groups = ..., ...)`
 - `simulate(mvSIMMAP_object, nsim = ..., param = list(...))` for mixed-process SIMMAP draws from a fitted or fixed scaffold
+- default OU/OUM alpha decomposition is `scalarPositive`, so each OU/OUM process group gets one positive pull parameter unless `param$decomp` overrides it
+- when comparing to `mvOU`, assume the current mixed fitter uses `root=TRUE`, `vcv="fixedRoot"` semantics with one global root vector unless and until that machinery changes
 
 Current simulation-first scaffold path:
 
@@ -118,6 +120,7 @@ Important paths:
 - Treat the BMM correlation-aware code as experimental even though it is merged locally.
 - Treat `mvSIMMAP()` as the current mixed-process SIMMAP entry point; `mvgls` integration is still only a draft design.
 - Treat `simulate()` on `mvmorph.mixed` objects as the current mixed-process SIMMAP simulation entry point; `mvSIM()` itself is still not mixed-aware.
+- Prefer `method = "rpf"` and the default `decomp = "scalarPositive"` when starting new `mvSIMMAP()` fits unless a richer alpha structure is clearly needed.
 
 ## First Files To Read For New Work
 

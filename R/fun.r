@@ -269,6 +269,9 @@ startParam <- function(p, matrix, tree, index.user=NULL, ...){
         alpha <- vector("numeric",p)
         alpha<-log(hlife)
     },
+    "scalarPositive"={
+        alpha <- log(mean(hlife))
+    },
     "lower"={
         alpha <- vector("numeric",p+dim1)
         alpha[(dim1+1):(dim1+p)]<-log(hlife)
@@ -393,6 +396,11 @@ matrixParam<-function(x,p,matrix="cholesky",index.user=NULL,tol=0.000001){
         A<-diag(exp(x)+tol,p)
         eigval<-eigen(A)
         Adecomp<-list(vectors=eigval$vectors, values=eigval$values, A=A, invectors=t(eigval$vectors))
+    },
+    "scalarPositive"={
+        value <- exp(x[1]) + tol
+        A <- diag(value, p)
+        Adecomp <- list(vectors=diag(p), values=rep(value, p), A=A, invectors=diag(p))
     },
     "equal"={
         sigma<-tcrossprod(build.chol(x,p))

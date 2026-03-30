@@ -353,10 +353,14 @@ target_derived_tips <- env_int("MVSIMMAP_BENCH_TARGET_DERIVED_TIPS", 28L)
 ntraits <- env_int("MVSIMMAP_BENCH_NTRAITS", 3L)
 nsim <- env_int("MVSIMMAP_BENCH_REPS", 10L)
 method <- env_chr("MVSIMMAP_BENCH_METHOD", "rpf")
+alpha_decomp <- env_chr("MVSIMMAP_BENCH_ALPHA_DECOMP", "scalarPositive")
 output_dir <- env_chr("MVSIMMAP_BENCH_OUTPUT_DIR", "")
 
 if (!method %in% c("rpf", "inverse", "pseudoinverse")) {
   stop("MVSIMMAP_BENCH_METHOD must be one of rpf, inverse, pseudoinverse", call. = FALSE)
+}
+if (!alpha_decomp %in% c("scalarPositive", "diagonalPositive", "diagonal", "cholesky")) {
+  stop("MVSIMMAP_BENCH_ALPHA_DECOMP must be one of scalarPositive, diagonalPositive, diagonal, cholesky", call. = FALSE)
 }
 
 benchmark <- make_benchmark_simmap(
@@ -380,7 +384,7 @@ scaffold <- mvSIMMAP(
   param = list(
     ntraits = ntraits,
     names_traits = normalize_trait_names(ntraits),
-    decomp = "diagonalPositive",
+    decomp = alpha_decomp,
     decompSigma = "cholesky"
   ),
   method = method,
@@ -395,7 +399,7 @@ run_one <- function(i) {
     process = process,
     method = method,
     optimization = "L-BFGS-B",
-    param = list(decomp = "diagonalPositive", decompSigma = "cholesky"),
+    param = list(decomp = alpha_decomp, decompSigma = "cholesky"),
     control = list(
       maxit = 500,
       retry.unreliable = TRUE,
@@ -429,6 +433,7 @@ metadata <- c(
   paste("ntraits:", ntraits),
   paste("nsim:", nsim),
   paste("method:", method),
+  paste("alpha_decomp:", alpha_decomp),
   paste("shift_node:", benchmark$shift_node),
   paste("derived_tips:", benchmark$derived_tips),
   paste("ncores:", ncores),
@@ -447,6 +452,7 @@ cat("derived_tips", benchmark$derived_tips, "\n")
 cat("regime_B_root_depth", depths[benchmark$shift_node], "\n")
 cat("regime_B_remaining_height", max(depths) - depths[benchmark$shift_node], "\n")
 cat("method", method, "\n")
+cat("alpha_decomp", alpha_decomp, "\n")
 cat("ncores", ncores, "\n")
 cat("elapsed_sec", unname(timing[["elapsed"]]), "\n")
 

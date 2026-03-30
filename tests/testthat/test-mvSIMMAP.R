@@ -122,6 +122,7 @@ test_that("mvSIMMAP single-regime OU special case matches mvOU likelihoods", {
         process=c(A="OU"),
         method="inverse",
         optimization="fixed",
+        param=list(decomp="cholesky"),
         echo=FALSE
     )
     fit_ou <- mvOU(
@@ -166,6 +167,33 @@ test_that("mvSIMMAP uses separate OU parameter blocks for different painted regi
     expect_equal(fit$param$nprocess.groups, 2)
     expect_identical(fit$param$names_process_groups, c("A", "B"))
     expect_identical(rownames(fit$theta), c("root", "theta.A", "theta.B"))
+})
+
+test_that("mvSIMMAP defaults to scalarPositive alpha for both OU and OUM groups", {
+    tree <- make_two_regime_simmap(seed=111, n=8)
+    X <- matrix(rnorm(ape::Ntip(tree) * 3), ncol=3)
+    rownames(X) <- tree$tip.label
+
+    fit_ou <- mvSIMMAP(
+        tree, X,
+        process=c(A="OU", B="OU"),
+        method="inverse",
+        optimization="fixed",
+        echo=FALSE
+    )
+    fit_oum <- mvSIMMAP(
+        tree, X,
+        process=c(A="OUM", B="OUM"),
+        process.groups=c(A="ou_shared", B="ou_shared"),
+        method="inverse",
+        optimization="fixed",
+        echo=FALSE
+    )
+
+    expect_identical(fit_ou$param$decomp, "scalarPositive")
+    expect_identical(fit_oum$param$decomp, "scalarPositive")
+    expect_identical(attr(fit_ou$llik, "alpha"), 2L)
+    expect_identical(attr(fit_oum$llik, "alpha"), 1L)
 })
 
 test_that("mvSIMMAP shared OU groups collapse to one optimum for the likelihood", {
@@ -332,6 +360,9 @@ test_that("mvSIMMAP fixed objects use the mixed print method with a regime summa
     expect_match(out, "theta\\.owner")
     expect_match(out, "ou_shared")
     expect_match(out, "No optimization performed")
+    expect_match(out, "Root treatment:")
+    expect_match(out, "fixedRoot semantics")
+    expect_match(out, "Mean structure:")
 })
 
 test_that("mvSIMMAP print summary distinguishes OU and OUM theta ownership", {
@@ -389,7 +420,35 @@ test_that("mvSIMMAP summary method returns a compact structural summary", {
     expect_match(out, "mvSIMMAP summary")
     expect_match(out, "Parameter blocks")
     expect_match(out, "Regime summary")
+    expect_match(out, "Root treatment:")
+    expect_match(out, "Mean structure:")
     expect_match(out, "theta:\\ttheta\\.A, theta\\.B")
+})
+
+test_that("mvSIMMAP records fixed-root semantics explicitly", {
+    tree <- make_two_regime_simmap(seed=182, n=8)
+    X <- matrix(rnorm(ape::Ntip(tree) * 2), ncol=2)
+    rownames(X) <- tree$tip.label
+
+    fit <- mvSIMMAP(
+        tree, X,
+        process=c(A="OU", B="OUM"),
+        process.groups=c(A="ou_shared", B="oum_shared"),
+        method="inverse",
+        optimization="fixed",
+        echo=FALSE
+    )
+
+    expect_identical(fit$param$root, TRUE)
+    expect_identical(fit$param$vcv, "fixedRoot")
+    expect_match(fit$param$root.treatment, "fixedRoot semantics")
+    expect_match(fit$param$mean.structure, "global root")
+    expect_match(fit$param$mean.structure, "OU-group optimum")
+    expect_match(fit$param$mean.structure, "OUM-regime optimum")
+
+    sum_fit <- summary(fit)
+    expect_match(sum_fit$root.treatment, "fixedRoot semantics")
+    expect_match(sum_fit$mean.structure, "global root")
 })
 
 test_that("mvSIMMAP multivariate helpers keep fitted output interpretable", {
@@ -431,6 +490,39 @@ test_that("mvSIMMAP multivariate helpers keep fitted output interpretable", {
     compact_out <- paste(capture.output(print(fit, compact=TRUE)), collapse="\n")
     expect_match(compact_out, "mvSIMMAP summary")
     expect_match(compact_out, "Multivariate overview")
+})
+
+test_that("mvSIMMAP scalarPositive alpha constrains OU pull to a shared positive scalar", {
+    tree <- make_two_regime_simmap(seed=182, n=8)
+    X <- matrix(rnorm(ape::Ntip(tree) * 3), ncol=3)
+    rownames(X) <- tree$tip.label
+
+    fit_diag <- mvSIMMAP(
+        tree, X,
+        process=c(A="BM", B="OU"),
+        method="inverse",
+        optimization="fixed",
+        param=list(decomp="diagonalPositive", decompSigma="cholesky"),
+        echo=FALSE
+    )
+    fit_scalar <- mvSIMMAP(
+        tree, X,
+        process=c(A="BM", B="OU"),
+        method="inverse",
+        optimization="fixed",
+        param=list(
+            decomp="scalarPositive",
+            decompSigma="cholesky",
+            alpha=list(B=diag(c(2, 4, 6), 3))
+        ),
+        echo=FALSE
+    )
+
+    expect_identical(fit_scalar$param$decomp, "scalarPositive")
+    expect_lt(attr(fit_scalar$llik, "alpha"), attr(fit_diag$llik, "alpha"))
+    expect_equal(unname(diag(fit_scalar$alpha$B)), rep(mean(c(2, 4, 6)), 3), tolerance=1e-5)
+    expect_equal(fit_scalar$alpha$B[upper.tri(fit_scalar$alpha$B)], rep(0, 3))
+    expect_equal(fit_scalar$alpha$B[lower.tri(fit_scalar$alpha$B)], rep(0, 3))
 })
 
 test_that("mvSIMMAP supports a multivariate BM to OU simulation and recovery smoke path", {
@@ -664,6 +756,55 @@ test_that("simulate() supports single-group scalar overrides and error inflation
     actual <- simulate(scaffold, nsim=1, seed=202, param=override, error=error_mat)
 
     expect_equal(actual, expected)
+})
+
+test_that("mvSIMMAP fit path reorders named data and error inputs consistently", {
+    tree <- make_single_regime_simmap(ape::rtree(6), regime="A")
+    X <- matrix(rnorm(ape::Ntip(tree)), ncol=1,
+                dimnames=list(tree$tip.label, "y"))
+    err <- matrix(seq_len(ape::Ntip(tree)) * 0.01, ncol=1,
+                  dimnames=list(tree$tip.label, "y"))
+
+    fit_ref <- mvSIMMAP(
+        tree, X,
+        process=c(A="BM"),
+        error=err,
+        method="inverse",
+        optimization="fixed",
+        echo=FALSE
+    )
+
+    shuffled_tips <- rev(tree$tip.label)
+    fit_shuffled <- mvSIMMAP(
+        tree, X[shuffled_tips, , drop=FALSE],
+        process=c(A="BM"),
+        error=err[shuffled_tips, , drop=FALSE],
+        method="inverse",
+        optimization="fixed",
+        echo=FALSE
+    )
+
+    expect_equal(
+        fit_ref$llik(0.1, root.mle=TRUE),
+        fit_shuffled$llik(0.1, root.mle=TRUE)
+    )
+})
+
+test_that("mvSIMMAP now errors on mismatched named data rows", {
+    tree <- make_single_regime_simmap(ape::rtree(6), regime="A")
+    X <- matrix(rnorm(ape::Ntip(tree)), ncol=1,
+                dimnames=list(paste0("wrong_", seq_len(ape::Ntip(tree))), "y"))
+
+    expect_error(
+        mvSIMMAP(
+            tree, X,
+            process=c(A="BM"),
+            method="inverse",
+            optimization="fixed",
+            echo=FALSE
+        ),
+        "Data row names must match the tree tip labels"
+    )
 })
 
 test_that("simulate() on mvSIMMAP scaffolds follows mvSIM return conventions", {

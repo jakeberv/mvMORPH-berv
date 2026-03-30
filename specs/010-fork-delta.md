@@ -196,6 +196,7 @@ The important grouping semantics are:
 
 - `process` chooses the family for each painted regime
 - `process.groups` chooses which painted regimes share fitted process parameters
+- the current mean structure always includes one global root vector, matching the fixed-root side of the older `mvOU` semantics
 - shared `OU` groups are treated as one OU regime for the likelihood, with shared `alpha`, `sigma`, and `theta`
 - shared `OUM` groups share OU dynamics but keep painted-regime-specific optima
 
@@ -205,12 +206,15 @@ The current standalone `mvSIMMAP()` path now includes:
 
 - detailed `print()` and compact `summary()` methods
 - regime-summary output showing `process`, `process.group`, and `theta.owner`
+- default OU/OUM `alpha` fitting through the regularized `scalarPositive` decomposition, with richer alternatives still available through `param$decomp`
+- explicit root-treatment and mean-structure labels in the fitted object and printed summaries, currently reflecting a fixed-root-style mixed-model formulation
 - richer Hessian diagnostics with labels such as `reliable`, `nearly flat/boundary`, and saddle-point warnings
 - optional jittered restarts for unreliable fits through `control=list(retry.unreliable=TRUE, ...)`
 - EB `beta` printing that annotates values at or near zero as the BM boundary
 - `LogLik` stored as a standard `logLik` object so generic tools like `BIC()` work directly on fitted objects
 - `simulate()` support for `mvSIMMAP` objects, including fixed scaffolds and manual parameter overrides for mixed-process draws
 - fixed-scaffold construction through `mvSIMMAP(..., data = NULL, optimization = "fixed", param = list(ntraits = ...))`
+- dense likelihood backends `rpf`, `inverse`, and `pseudoinverse`, with `rpf` as the recommended default
 
 ### Important Files
 

@@ -65,9 +65,9 @@ That regression file currently covers:
 - compact summary/print behavior, Hessian diagnostics, retry handling, and standard `logLik` / `BIC()` compatibility
 - scaffold-based mixed-process simulation through `simulate(mvSIMMAP_object, ...)`, including manual parameter overrides and `data=NULL` fixed-scaffold construction
 
-There is not yet a larger simulation campaign or summary report for `mvSIMMAP()` comparable to the OUM and corrpower workstreams.
+There is still not yet a large automated simulation campaign for `mvSIMMAP()` at the scale of the OUM and corrpower workstreams.
 
-There is now, however, a durable local exact-tree benchmark summary for the standalone mixed fitter in:
+There is now, however, a durable local benchmark summary for the standalone mixed fitter in:
 
 - `specs/060-mvSIMMAP-simulation-validation.md`
 
@@ -77,6 +77,9 @@ What changed recently:
 
 - mixed-process SIMMAP simulation is now available through `simulate()` on `mvSIMMAP` objects
 - `mvSIMMAP(..., data = NULL, optimization = "fixed", ...)` can now be used as a lightweight simulation scaffold constructor
+- the default OU/OUM alpha decomposition is now `scalarPositive`, with `diagonalPositive` and `cholesky` available as opt-in richer alternatives
+- the current mixed fitter uses one global GLS-estimated root vector, corresponding to the fixed-root side of the older `mvOU` root semantics
+- reusable exact-tree benchmark drivers now exist for both the canonical `BM -> OU` case and the shared-OUM case
 - `mvSIM()` itself is still limited to the legacy single-family model selectors and is not yet a direct mixed-process SIMMAP simulator
 
 ### Documentation

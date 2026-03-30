@@ -387,6 +387,10 @@
             "cholesky" = sym.unpar(value),
             "diagonal" = diag(value),
             "diagonalPositive" = log(diag(value)),
+            "scalarPositive" = {
+                eigvals <- Re(eigen(.mvSIMMAP_symmetrize(value), only.values=TRUE)$values)
+                log(max(mean(eigvals), sqrt(.Machine$double.eps)))
+            },
             startParam(p, decomp, tree, hlife=Re(eigen(value)$values))
         )
     }else if(is.numeric(value)){
@@ -660,6 +664,25 @@
     make.unique(trait_names, sep=".")
 }
 
+.mvSIMMAP_prepare_data <- function(data, tip_labels, echo=TRUE){
+    data <- as.matrix(data)
+    if(is.null(dim(data))){
+        data <- matrix(data, ncol=1L)
+    }
+    if(!is.null(rownames(data))){
+        if(anyDuplicated(rownames(data))){
+            stop("Data row names must be unique and match the tree tip labels", call.=FALSE)
+        }
+        if(!all(tip_labels %in% rownames(data))){
+            stop("Data row names must match the tree tip labels", call.=FALSE)
+        }
+        data <- data[tip_labels, , drop=FALSE]
+    }else if(isTRUE(echo)){
+        cat("species in the matrix are assumed to be in the same order as in the phylogeny, otherwise specify rownames of 'data'", "\n")
+    }
+    data
+}
+
 .mvSIMMAP_empty_parameter_table <- function(){
     data.frame(
         block=character(0),
@@ -855,6 +878,25 @@
     )
 }
 
+.mvSIMMAP_root_treatment_label <- function(){
+    "global root estimated by GLS (fixedRoot semantics)"
+}
+
+.mvSIMMAP_mean_structure_label <- function(process, process.groups=NULL){
+    regime_summary <- .mvSIMMAP_regime_summary(process, process.groups)
+    ou_groups <- unique(regime_summary$theta.owner[regime_summary$process == "OU"])
+    ou_groups <- ou_groups[nzchar(ou_groups)]
+    n_oum <- sum(regime_summary$process == "OUM")
+    parts <- "global root"
+    if(length(ou_groups)){
+        parts <- c(parts, paste0(length(ou_groups), " OU-group optimum", if(length(ou_groups) == 1L) "" else "s"))
+    }
+    if(n_oum > 0L){
+        parts <- c(parts, paste0(n_oum, " OUM-regime optimum", if(n_oum == 1L) "" else "s"))
+    }
+    paste(parts, collapse=" + ")
+}
+
 .mvSIMMAP_format_beta <- function(beta, zero_tol=100 * sqrt(.Machine$double.eps)){
     if(!length(beta)) return(beta)
     out <- data.frame(
@@ -890,6 +932,8 @@
     if(!is.null(x$AIC)) cat("AIC:\t", x$AIC, "\n")
     if(!is.null(x$AICc)) cat("AICc:\t", x$AICc, "\n")
     if(!is.null(x$param[["nparam"]])) cat(x$param$nparam, "parameters", "\n")
+    if(!is.null(x$param[["root.treatment"]])) cat("Root treatment:\t", x$param$root.treatment, "\n", sep="")
+    if(!is.null(x$param[["mean.structure"]])) cat("Mean structure:\t", x$param$mean.structure, "\n", sep="")
     if(!is.null(x$diagnostics$hessian$label)){
         cat("Hessian:\t", x$diagnostics$hessian$label, "\n")
     }
@@ -977,6 +1021,8 @@
         model=object$param$model %||% "SIMMAPmixed",
         method=object$param$method %||% NA_character_,
         optimization=object$param$optimization %||% NA_character_,
+        root.treatment=object$param$root.treatment %||% NA_character_,
+        mean.structure=object$param$mean.structure %||% NA_character_,
         dimensions=dims,
         fit=fit,
         blocks=blocks,
@@ -994,6 +1040,8 @@
     cat("Optimization:\t", x$optimization, "\n", sep="")
     cat("Dimensions:\t", x$dimensions$n, " species, ", x$dimensions$p, " traits, ",
         x$dimensions$nregimes, " painted regimes, ", x$dimensions$nprocess.groups, " process groups", "\n", sep="")
+    if(!is.na(x$root.treatment)) cat("Root treatment:\t", x$root.treatment, "\n", sep="")
+    if(!is.na(x$mean.structure)) cat("Mean structure:\t", x$mean.structure, "\n", sep="")
     if(isTRUE(x$fit$optimized)){
         cat("LogLik:\t", x$fit$logLik, "\n")
         cat("AIC:\t", x$fit$AIC, "\n")
@@ -1060,11 +1108,11 @@
 
 mvSIMMAP <- function(tree, data, process, process.groups=NULL, error=NULL,
                      param=list(alpha=NULL, sigma=NULL, beta=NULL,
-                                decomp=c("cholesky", "diagonal", "diagonalPositive"),
+                                decomp=c("scalarPositive", "diagonalPositive", "diagonal", "cholesky"),
                                 decompSigma=c("cholesky", "diagonal")),
                      method=c("rpf", "inverse", "pseudoinverse"),
                      scale.height=FALSE,
-                     optimization=c("L-BFGS-B", "Nelder-Mead", "subplex"),
+                     optimization=c("L-BFGS-B", "Nelder-Mead", "subplex", "fixed"),
                      control=list(maxit=20000),
                      diagnostic=TRUE, echo=TRUE){
 
@@ -1079,6 +1127,9 @@ mvSIMMAP <- function(tree, data, process, process.groups=NULL, error=NULL,
         stop("mvSIMMAP currently supports only the \"rpf\", \"inverse\", and \"pseudoinverse\" methods", call.=FALSE)
     }
     optimization <- optimization[1]
+    if(!optimization %in% c("L-BFGS-B", "Nelder-Mead", "subplex", "fixed")){
+        stop("mvSIMMAP currently supports only \"L-BFGS-B\", \"Nelder-Mead\", \"subplex\", and \"fixed\" optimization modes", call.=FALSE)
+    }
     control_settings <- .mvSIMMAP_extract_control(control)
     optimizer_control <- control_settings$optimizer
     special_control <- control_settings$special
@@ -1129,16 +1180,7 @@ mvSIMMAP <- function(tree, data, process, process.groups=NULL, error=NULL,
         trait_names <- .mvSIMMAP_normalize_trait_names(trait_names, p)
         data <- matrix(0, nrow=Ntip(tree), ncol=p, dimnames=list(tree$tip.label, trait_names))
     }else{
-        data <- as.matrix(data)
-        if(!is.null(rownames(data))){
-            if(any(tree$tip.label == rownames(data))){
-                data <- data[tree$tip.label, , drop=FALSE]
-            }else if(isTRUE(echo)){
-                cat("row names of the data matrix must match tip names of your phylogeny!", "\n")
-            }
-        }else if(isTRUE(echo)){
-            cat("species in the matrix are assumed to be in the same order as in the phylogeny, otherwise specify rownames of 'data'", "\n")
-        }
+        data <- .mvSIMMAP_prepare_data(data, tip_labels=tree$tip.label, echo=echo)
         p <- ncol(data)
         if(is.null(p)) p <- 1L
         colnames(data) <- .mvSIMMAP_normalize_trait_names(colnames(data), p)
@@ -1147,17 +1189,20 @@ mvSIMMAP <- function(tree, data, process, process.groups=NULL, error=NULL,
     if(n != Ntip(tree)){
         stop("The number of rows in data must match the number of tips in the tree", call.=FALSE)
     }
-    if(!is.null(error)){
-        error <- as.vector(error)
-        error[is.na(error)] <- 0
-    }
+    error <- .mvSIMMAP_error_vector(
+        error,
+        n=n,
+        p=p,
+        tip_labels=tree$tip.label,
+        trait_names=colnames(data)
+    )
     NA_val <- FALSE
     Indice_NA <- NULL
     if(any(is.na(data))){
         NA_val <- TRUE
         Indice_NA <- which(is.na(as.vector(data)))
     }
-    decomp <- if(is.null(param[["decomp"]])) "cholesky" else param$decomp[1]
+    decomp <- if(is.null(param[["decomp"]])) "scalarPositive" else param$decomp[1]
     decompSigma <- if(is.null(param[["decompSigma"]])) "cholesky" else param$decompSigma[1]
     sigma_fallback <- if(data_missing){
         startParamSigma(p, decompSigma, tree, data, guess=diag(p))
@@ -1357,6 +1402,10 @@ mvSIMMAP <- function(tree, data, process, process.groups=NULL, error=NULL,
         param$model <- "SIMMAPmixed"
         param$decomp <- decomp
         param$decompSigma <- decompSigma
+        param$root <- TRUE
+        param$vcv <- "fixedRoot"
+        param$root.treatment <- .mvSIMMAP_root_treatment_label()
+        param$mean.structure <- .mvSIMMAP_mean_structure_label(process, process_groups)
         param$mean.parameters <- mean_names
         param$alphafun <- alphafun
         param$sigmafun <- sigmafun
@@ -1529,6 +1578,10 @@ mvSIMMAP <- function(tree, data, process, process.groups=NULL, error=NULL,
     param$model <- "SIMMAPmixed"
     param$decomp <- decomp
     param$decompSigma <- decompSigma
+    param$root <- TRUE
+    param$vcv <- "fixedRoot"
+    param$root.treatment <- .mvSIMMAP_root_treatment_label()
+    param$mean.structure <- .mvSIMMAP_mean_structure_label(process, process_groups)
     param$mean.parameters <- mean_names
     param$alphafun <- alphafun
     param$sigmafun <- sigmafun
@@ -1798,12 +1851,16 @@ parameters.mvmorph.mixed <- function(object, ...){
     if(is.null(error)) return(NULL)
     if(is.atomic(error) && is.null(dim(error))){
         error <- as.numeric(error)
+        error[is.na(error)] <- 0
         if(length(error) == n * p) return(error)
         if(length(error) == n && p == 1L) return(error)
         stop("The measurement-error override must have length n * p", call.=FALSE)
     }
     error <- as.matrix(error)
     if(!is.null(rownames(error))){
+        if(anyDuplicated(rownames(error))){
+            stop("Measurement-error row names must be unique and match the tip labels", call.=FALSE)
+        }
         if(all(tip_labels %in% rownames(error))){
             error <- error[tip_labels, , drop=FALSE]
         }else{
@@ -1811,6 +1868,9 @@ parameters.mvmorph.mixed <- function(object, ...){
         }
     }
     if(!is.null(colnames(error))){
+        if(anyDuplicated(colnames(error))){
+            stop("Measurement-error column names must be unique and match the trait names", call.=FALSE)
+        }
         if(all(trait_names %in% colnames(error))){
             error <- error[, trait_names, drop=FALSE]
         }else{
@@ -1820,6 +1880,7 @@ parameters.mvmorph.mixed <- function(object, ...){
     if(nrow(error) != n || ncol(error) != p){
         stop("The measurement-error override must have dimensions n x p", call.=FALSE)
     }
+    error[is.na(error)] <- 0
     as.numeric(error)
 }
 
