@@ -1,6 +1,14 @@
 # mvMORPH
 mvMORPH: an R package for fitting multivariate evolutionary models to morphometric data    
 
+## Experimental Fork Notice
+
+This repository is an experimental fork of `mvMORPH` where I am testing new models and features built with Codex.
+
+Nothing in this fork is guaranteed at this point: APIs may change, behavior may shift, numerical results may need additional validation, and features may be incomplete or removed without notice.
+
+If you need the stable `mvMORPH` package, use the CRAN release or the upstream repository rather than relying on this fork.
+
 This package allows the fitting of multivariate evolutionary models (Ornstein-Uhlenbeck, Brownian motion, Early burst, Shift models) on species trees and time series.
 It also provides functions to compute log-likelihood of users specified models with fast methods (*e.g.*, for Bayesian approaches or customized comparative methods), simulates correlated traits under various models, constrain various parts of multivariate models...
 
@@ -28,7 +36,9 @@ The current stable version of the mvMORPH package (1.2.0) is on the CRAN reposit
 
 ## **Package Installation**
 
-You can install the package directly from gitHub through devtools:
+For stable use, install the CRAN or upstream `mvMORPH` release.
+
+The command below installs the upstream GitHub package, not this experimental fork:
 
 ```
 library(devtools)
@@ -46,4 +56,3 @@ Any bugs encountered when using the package can be reported [here](https://githu
 ## **Package citation**
 
 **Clavel, J., Escarguel, G., Merceron, G. 2015.** mvMORPH: an R package for fitting multivariate evolutionary models to morphometric data. Methods in Ecology and Evolution, 6(11):1311-1319.
-
