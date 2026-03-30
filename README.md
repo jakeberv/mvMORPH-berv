@@ -15,7 +15,7 @@ This fork currently includes several experimental additions on top of upstream `
 
 - `mvgls(..., model="OUM")` has been extended so user-supplied covariates can be retained alongside regime-specific optima rather than being collapsed away.
 - Experimental correlation-aware `BMM` support is available through `mvgls(..., model="BMM", bmm.structure="corrpower")`, with a simpler nested comparison mode via `bmm.scale=FALSE`.
-- A standalone experimental `mvSIMMAP()` fitter can fit painted `simmap` trees with mixed `BM`, `OU`, `OUM`, and `EB` regimes, including shared `process.groups`, richer summaries, and improved post-fit diagnostics.
+- A standalone experimental `mvSIMMAP()` fitter can fit painted `simmap` trees with mixed `BM`, `OU`, `OUM`, and `EB` regimes, including shared `process.groups`, richer summaries, improved post-fit diagnostics, and scaffold-based `simulate()` support for mixed-process SIMMAP models.
 - This fork also includes simulation harnesses, reports, and design notes that were added to validate and iterate on these experimental paths.
 
 For fuller branch-local summaries of the implemented features, see `specs/010-fork-delta.md` and `specs/020-validation-and-open-questions.md`. For the draft design note covering planned `mvgls` integration of mixed-process SIMMAP support, see `specs/050-mvgls-simmap-mixed-design.md`.

@@ -189,6 +189,8 @@ Users can now fit heterogeneous painted-tree models like:
 - `mvSIMMAP(tree, X, process = c(A="BM", B="OUM", C="EB"))`
 - `mvSIMMAP(tree, X, process = c(A="OU", B="OU"), process.groups = c(A="ou_shared", B="ou_shared"))`
 - `mvSIMMAP(tree, X, process = c(A="OUM", B="OUM"), process.groups = c(A="ou_shared", B="ou_shared"))`
+- `mvSIMMAP(tree, data = NULL, process = c(A="BM", B="EB"), optimization = "fixed", param = list(ntraits = 2))`
+- `simulate(scaffold, nsim = 100, param = list(theta = ..., sigma = ..., alpha = ..., beta = ...))`
 
 The important grouping semantics are:
 
@@ -207,6 +209,8 @@ The current standalone `mvSIMMAP()` path now includes:
 - optional jittered restarts for unreliable fits through `control=list(retry.unreliable=TRUE, ...)`
 - EB `beta` printing that annotates values at or near zero as the BM boundary
 - `LogLik` stored as a standard `logLik` object so generic tools like `BIC()` work directly on fitted objects
+- `simulate()` support for `mvSIMMAP` objects, including fixed scaffolds and manual parameter overrides for mixed-process draws
+- fixed-scaffold construction through `mvSIMMAP(..., data = NULL, optimization = "fixed", param = list(ntraits = ...))`
 
 ### Important Files
 

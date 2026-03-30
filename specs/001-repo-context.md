@@ -96,6 +96,11 @@ Important paths:
 Current public mixed-process SIMMAP path:
 
 - `mvSIMMAP(tree, data, process, process.groups = ..., ...)`
+- `simulate(mvSIMMAP_object, nsim = ..., param = list(...))` for mixed-process SIMMAP draws from a fitted or fixed scaffold
+
+Current simulation-first scaffold path:
+
+- `mvSIMMAP(tree, data = NULL, process = ..., optimization = "fixed", param = list(ntraits = ..., ...))`
 
 Important paths:
 
@@ -112,6 +117,7 @@ Important paths:
 - Treat the files in `reports/` and `tests/reports/` as generated summaries that capture prior campaign outcomes.
 - Treat the BMM correlation-aware code as experimental even though it is merged locally.
 - Treat `mvSIMMAP()` as the current mixed-process SIMMAP entry point; `mvgls` integration is still only a draft design.
+- Treat `simulate()` on `mvmorph.mixed` objects as the current mixed-process SIMMAP simulation entry point; `mvSIM()` itself is still not mixed-aware.
 
 ## First Files To Read For New Work
 

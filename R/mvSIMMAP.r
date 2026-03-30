@@ -315,6 +315,64 @@
     x[[1]]
 }
 
+.mvSIMMAP_infer_ntraits <- function(param, nmean=NULL){
+    explicit <- param[["ntraits"]]
+    if(!is.null(explicit)){
+        p <- as.integer(explicit)[1]
+        if(is.na(p) || p < 1L){
+            stop("param$ntraits must be a positive integer when building a fixed mvSIMMAP scaffold without data", call.=FALSE)
+        }
+        return(p)
+    }
+    candidates <- integer(0)
+    add_candidate <- function(value){
+        if(length(value) == 1L && is.finite(value) && value >= 1L){
+            candidates <<- c(candidates, as.integer(value))
+        }
+    }
+    names_traits <- param[["names_traits"]]
+    if(!is.null(names_traits)){
+        add_candidate(length(names_traits))
+    }
+    theta <- param[["theta"]]
+    if(is.matrix(theta) || is.data.frame(theta)){
+        add_candidate(ncol(as.matrix(theta)))
+    }else if(is.list(theta) && length(theta)){
+        first_theta <- theta[[1]]
+        if(is.matrix(first_theta) || is.data.frame(first_theta)){
+            add_candidate(ncol(as.matrix(first_theta)))
+        }else if(is.numeric(first_theta)){
+            add_candidate(length(first_theta))
+        }
+    }else if(is.numeric(theta) && !is.null(nmean) && length(theta) %% nmean == 0L){
+        add_candidate(length(theta) / nmean)
+    }
+    infer_from_matrix_list <- function(x){
+        if(is.matrix(x) || is.data.frame(x)){
+            add_candidate(nrow(as.matrix(x)))
+            return(invisible(NULL))
+        }
+        if(is.list(x) && length(x)){
+            for(value in x){
+                if(is.matrix(value) || is.data.frame(value)){
+                    add_candidate(nrow(as.matrix(value)))
+                    return(invisible(NULL))
+                }
+            }
+        }
+    }
+    infer_from_matrix_list(param[["sigma"]])
+    infer_from_matrix_list(param[["alpha"]])
+    candidates <- unique(candidates[candidates >= 1L])
+    if(length(candidates) == 1L){
+        return(candidates)
+    }
+    if(length(candidates) > 1L){
+        stop("Could not infer a unique trait count for the fixed mvSIMMAP scaffold; please supply param$ntraits explicitly", call.=FALSE)
+    }
+    stop("When data=NULL and optimization=\"fixed\", supply param$ntraits or matrix-valued theta/sigma/alpha information so mvSIMMAP can infer the number of traits", call.=FALSE)
+}
+
 .mvSIMMAP_sigma_start <- function(value, p, decompSigma, tree, data, fallback){
     if(is.null(value)) return(fallback)
     if(is.matrix(value)) return(startParamSigma(p, decompSigma, tree, data, guess=value))
@@ -800,21 +858,10 @@ mvSIMMAP <- function(tree, data, process, process.groups=NULL, error=NULL,
                      diagnostic=TRUE, echo=TRUE){
 
     if(missing(tree)) stop("The tree object is missing!", call.=FALSE)
-    if(missing(data)) stop("You must provide a dataset along with your tree!", call.=FALSE)
     if(missing(process)) stop("You must provide a per-regime process assignment", call.=FALSE)
     if(!inherits(tree, "simmap")) stop("A tree of class \"simmap\" is required", call.=FALSE)
     if(is.null(tree[["mapped.edge"]]) || is.null(tree[["maps"]])){
         stop("The tree must include SIMMAP mapped regimes", call.=FALSE)
-    }
-    data <- as.matrix(data)
-    if(!is.null(rownames(data))){
-        if(any(tree$tip.label == rownames(data))){
-            data <- data[tree$tip.label, , drop=FALSE]
-        }else if(isTRUE(echo)){
-            cat("row names of the data matrix must match tip names of your phylogeny!", "\n")
-        }
-    }else if(isTRUE(echo)){
-        cat("species in the matrix are assumed to be in the same order as in the phylogeny, otherwise specify rownames of 'data'", "\n")
     }
     method <- method[1]
     if(!method %in% c("rpf", "inverse", "pseudoinverse")){
@@ -824,22 +871,6 @@ mvSIMMAP <- function(tree, data, process, process.groups=NULL, error=NULL,
     control_settings <- .mvSIMMAP_extract_control(control)
     optimizer_control <- control_settings$optimizer
     special_control <- control_settings$special
-    p <- ncol(data)
-    if(is.null(p)) p <- 1L
-    n <- nrow(data)
-    if(n != Ntip(tree)){
-        stop("The number of rows in data must match the number of tips in the tree", call.=FALSE)
-    }
-    if(!is.null(error)){
-        error <- as.vector(error)
-        error[is.na(error)] <- 0
-    }
-    NA_val <- FALSE
-    Indice_NA <- NULL
-    if(any(is.na(data))){
-        NA_val <- TRUE
-        Indice_NA <- which(is.na(as.vector(data)))
-    }
     tree <- .mvSIMMAP_scale_tree(tree, scale.height=scale.height)
     tree <- .mvSIMMAP_reorder_tree(tree, order="cladewise")
     regime_names <- colnames(tree$mapped.edge)
@@ -874,9 +905,55 @@ mvSIMMAP <- function(tree, data, process, process.groups=NULL, error=NULL,
     if(length(oum_regimes)){
         theta_by_regime[oum_regimes] <- match(paste0("regime::", oum_regimes), theta_ids)
     }
+    data_missing <- missing(data) || is.null(data)
+    if(data_missing){
+        if(optimization != "fixed"){
+            stop("You must provide a dataset along with your tree unless optimization=\"fixed\"", call.=FALSE)
+        }
+        p <- .mvSIMMAP_infer_ntraits(param, nmean=1L + length(theta_labels))
+        trait_names <- param[["names_traits"]]
+        if(!is.null(trait_names)){
+            trait_names <- as.character(trait_names)
+            if(length(trait_names) != p){
+                stop("param$names_traits must have length param$ntraits for fixed mvSIMMAP scaffolds without data", call.=FALSE)
+            }
+        }
+        data <- matrix(0, nrow=Ntip(tree), ncol=p, dimnames=list(tree$tip.label, trait_names))
+    }else{
+        data <- as.matrix(data)
+        if(!is.null(rownames(data))){
+            if(any(tree$tip.label == rownames(data))){
+                data <- data[tree$tip.label, , drop=FALSE]
+            }else if(isTRUE(echo)){
+                cat("row names of the data matrix must match tip names of your phylogeny!", "\n")
+            }
+        }else if(isTRUE(echo)){
+            cat("species in the matrix are assumed to be in the same order as in the phylogeny, otherwise specify rownames of 'data'", "\n")
+        }
+        p <- ncol(data)
+        if(is.null(p)) p <- 1L
+    }
+    n <- nrow(data)
+    if(n != Ntip(tree)){
+        stop("The number of rows in data must match the number of tips in the tree", call.=FALSE)
+    }
+    if(!is.null(error)){
+        error <- as.vector(error)
+        error[is.na(error)] <- 0
+    }
+    NA_val <- FALSE
+    Indice_NA <- NULL
+    if(any(is.na(data))){
+        NA_val <- TRUE
+        Indice_NA <- which(is.na(as.vector(data)))
+    }
     decomp <- if(is.null(param[["decomp"]])) "cholesky" else param$decomp[1]
     decompSigma <- if(is.null(param[["decompSigma"]])) "cholesky" else param$decompSigma[1]
-    sigma_fallback <- startParamSigma(p, decompSigma, tree, data)
+    sigma_fallback <- if(data_missing){
+        startParamSigma(p, decompSigma, tree, data, guess=diag(p))
+    }else{
+        startParamSigma(p, decompSigma, tree, data)
+    }
     alpha_fallback <- startParam(p, decomp, tree)
     maxHeight <- max(nodeHeights(tree))
     if(!is.finite(maxHeight) || maxHeight <= 0) maxHeight <- 1
@@ -1275,4 +1352,274 @@ summary.mvmorph.mixed <- function(object, ...){
 
 print.summary.mvmorph.mixed <- function(x, ...){
     .mvSIMMAP_print_summary(x)
+}
+
+.mvSIMMAP_extract_spec <- function(object, tree=NULL){
+    if(!is.null(tree)){
+        stop("simulate() for mvSIMMAP scaffolds does not yet support tree= overrides", call.=FALSE)
+    }
+    if(is.null(object$llik) || !is.function(object$llik)){
+        stop("The mvSIMMAP object does not contain an internal likelihood closure", call.=FALSE)
+    }
+    env <- environment(object$llik)
+    if(is.null(env) || !exists("spec", envir=env, inherits=FALSE)){
+        stop("The mvSIMMAP object does not retain the internal SIMMAP specification needed for simulation", call.=FALSE)
+    }
+    get("spec", envir=env, inherits=FALSE)
+}
+
+.mvSIMMAP_trait_names <- function(object, spec){
+    trait_names <- object$param$traits
+    if(is.null(trait_names)) trait_names <- colnames(object$theta)
+    if(is.null(trait_names)) trait_names <- rep("", spec$p)
+    trait_names
+}
+
+.mvSIMMAP_theta_matrix <- function(object, spec){
+    mean_names <- object$param$mean.parameters
+    if(is.null(mean_names)){
+        mean_names <- c("root", spec$theta_labels)
+    }
+    trait_names <- .mvSIMMAP_trait_names(object, spec)
+    theta_mat <- object$theta
+    if(is.null(theta_mat)){
+        theta_mat <- .mvSIMMAP_make_theta_matrix(
+            theta=rep(0, length(mean_names) * spec$p),
+            mean_names=mean_names,
+            trait_names=trait_names
+        )
+    }
+    theta_mat <- as.matrix(theta_mat)
+    theta_mat <- theta_mat[mean_names, , drop=FALSE]
+    if(ncol(theta_mat) != spec$p){
+        stop("The mvSIMMAP object has an incompatible theta matrix for simulation", call.=FALSE)
+    }
+    colnames(theta_mat) <- trait_names
+    theta_mat
+}
+
+.mvSIMMAP_named_list_override <- function(override, default_names, label){
+    if(is.null(override)) return(NULL)
+    if(!is.list(override) || is.data.frame(override)){
+        if(length(default_names) == 1L){
+            out <- list(override)
+            names(out) <- default_names
+            return(out)
+        }
+        stop("The ", label, " override must be a named list keyed by process group", call.=FALSE)
+    }
+    if(!length(override)) return(structure(list(), names=character(0)))
+    override_names <- names(override)
+    if(is.null(override_names)){
+        if(length(override) != length(default_names)){
+            stop("Unnamed ", label, " overrides must match the number of process groups", call.=FALSE)
+        }
+        names(override) <- default_names
+        return(override)
+    }
+    if(any(!nzchar(override_names))){
+        stop("All ", label, " overrides must be named by process group", call.=FALSE)
+    }
+    unknown <- setdiff(override_names, default_names)
+    if(length(unknown)){
+        stop("Unknown ", label, " override names: ", paste(unknown, collapse=", "), call.=FALSE)
+    }
+    override
+}
+
+.mvSIMMAP_merge_named_list <- function(default, override, label){
+    out <- default
+    override <- .mvSIMMAP_named_list_override(override, names(default), label)
+    if(is.null(override) || !length(override)) return(out)
+    for(name in names(override)){
+        out[[name]] <- override[[name]]
+    }
+    out
+}
+
+.mvSIMMAP_merge_named_numeric <- function(default, override, label){
+    out <- default
+    if(is.null(override)) return(out)
+    override_names <- names(override)
+    override <- as.numeric(override)
+    names(override) <- override_names
+    if(!length(default)){
+        if(length(override)){
+            stop("The scaffold does not include any ", label, " parameters to override", call.=FALSE)
+        }
+        return(out)
+    }
+    override_names <- names(override)
+    if(is.null(override_names)){
+        if(length(override) != length(default)){
+            stop("Unnamed ", label, " overrides must match the number of process groups", call.=FALSE)
+        }
+        names(override) <- names(default)
+        return(override)
+    }
+    if(any(!nzchar(override_names))){
+        stop("All ", label, " overrides must be named by process group", call.=FALSE)
+    }
+    unknown <- setdiff(override_names, names(default))
+    if(length(unknown)){
+        stop("Unknown ", label, " override names: ", paste(unknown, collapse=", "), call.=FALSE)
+    }
+    out[override_names] <- override[override_names]
+    out
+}
+
+.mvSIMMAP_merge_theta <- function(default, override){
+    out <- default
+    if(is.null(override)) return(out)
+    if(is.list(override) && !is.data.frame(override)){
+        override_names <- names(override)
+        if(is.null(override_names) || any(!nzchar(override_names))){
+            stop("Theta overrides supplied as a list must be named by theta block", call.=FALSE)
+        }
+        unknown <- setdiff(override_names, rownames(out))
+        if(length(unknown)){
+            stop("Unknown theta override rows: ", paste(unknown, collapse=", "), call.=FALSE)
+        }
+        for(name in override_names){
+            value <- as.numeric(override[[name]])
+            if(length(value) != ncol(out)){
+                stop("Theta override for ", name, " must have length ", ncol(out), call.=FALSE)
+            }
+            out[name, ] <- value
+        }
+        return(out)
+    }
+    if(is.matrix(override) || is.data.frame(override)){
+        override_mat <- as.matrix(override)
+        if(is.null(rownames(override_mat))){
+            if(!identical(dim(override_mat), dim(out))){
+                stop("Unnamed theta matrix overrides must match the full theta matrix dimensions", call.=FALSE)
+            }
+            rownames(override_mat) <- rownames(out)
+        }
+        row_index <- match(rownames(override_mat), rownames(out))
+        if(anyNA(row_index)){
+            stop("Unknown theta override rows: ", paste(rownames(override_mat)[is.na(row_index)], collapse=", "), call.=FALSE)
+        }
+        if(is.null(colnames(override_mat))){
+            if(ncol(override_mat) != ncol(out)){
+                stop("Theta matrix overrides must include one column per trait", call.=FALSE)
+            }
+            col_index <- seq_len(ncol(out))
+        }else{
+            col_index <- match(colnames(override_mat), colnames(out))
+            if(anyNA(col_index)){
+                stop("Unknown theta override columns: ", paste(colnames(override_mat)[is.na(col_index)], collapse=", "), call.=FALSE)
+            }
+        }
+        out[row_index, col_index] <- override_mat
+        return(out)
+    }
+    override_names <- names(override)
+    override <- as.numeric(override)
+    names(override) <- override_names
+    if(length(override) != length(out)){
+        if(ncol(out) == 1L && !is.null(names(override))){
+            unknown <- setdiff(names(override), rownames(out))
+            if(length(unknown)){
+                stop("Unknown theta override rows: ", paste(unknown, collapse=", "), call.=FALSE)
+            }
+            out[names(override), 1] <- override
+            return(out)
+        }
+        stop("Theta overrides supplied as a vector must match the full theta length", call.=FALSE)
+    }
+    .mvSIMMAP_make_theta_matrix(
+        theta=override,
+        mean_names=rownames(out),
+        trait_names=colnames(out)
+    )
+}
+
+.mvSIMMAP_simulation_values <- function(object, spec, param=NULL){
+    if(is.null(param)) param <- list()
+    if(!is.list(param)) stop("The 'param' override must be a list", call.=FALSE)
+    theta <- .mvSIMMAP_merge_theta(.mvSIMMAP_theta_matrix(object, spec), param[["theta"]])
+    sigma <- .mvSIMMAP_merge_named_list(object$sigma[spec$group_names], param[["sigma"]], "sigma")
+    alpha <- .mvSIMMAP_merge_named_list(object$alpha[spec$alpha_groups], param[["alpha"]], "alpha")
+    beta_default <- object$beta
+    if(length(beta_default)){
+        beta_default <- beta_default[names(beta_default)]
+    }
+    beta <- .mvSIMMAP_merge_named_numeric(beta_default, param[["beta"]], "beta")
+    list(
+        theta=theta,
+        values=list(
+            alpha=alpha,
+            sigma=sigma,
+            beta=beta
+        )
+    )
+}
+
+.mvSIMMAP_error_vector <- function(error, n, p, tip_labels, trait_names){
+    if(is.null(error)) return(NULL)
+    if(is.atomic(error) && is.null(dim(error))){
+        error <- as.numeric(error)
+        if(length(error) == n * p) return(error)
+        if(length(error) == n && p == 1L) return(error)
+        stop("The measurement-error override must have length n * p", call.=FALSE)
+    }
+    error <- as.matrix(error)
+    if(!is.null(rownames(error))){
+        if(all(tip_labels %in% rownames(error))){
+            error <- error[tip_labels, , drop=FALSE]
+        }else{
+            stop("Measurement-error row names must match the tip labels", call.=FALSE)
+        }
+    }
+    if(!is.null(colnames(error))){
+        if(all(trait_names %in% colnames(error))){
+            error <- error[, trait_names, drop=FALSE]
+        }else{
+            stop("Measurement-error column names must match the trait names", call.=FALSE)
+        }
+    }
+    if(nrow(error) != n || ncol(error) != p){
+        stop("The measurement-error override must have dimensions n x p", call.=FALSE)
+    }
+    as.numeric(error)
+}
+
+simulate.mvmorph.mixed <- function(object, nsim=1, seed=NULL, tree=NULL,
+                                   param=list(), error=NULL, method="cholesky", ...){
+    if(!inherits(object, "mvmorph.mixed")){
+        stop("simulate.mvmorph.mixed() requires an object of class \"mvmorph.mixed\"", call.=FALSE)
+    }
+    if(!is.null(seed)) set.seed(seed)
+    spec <- .mvSIMMAP_extract_spec(object, tree=tree)
+    resolved <- .mvSIMMAP_simulation_values(object, spec, param=param)
+    built <- .mvSIMMAP_build_model(spec, resolved$values)
+    theta_vec <- as.numeric(t(resolved$theta))
+    mean_vec <- as.numeric(built$D %*% theta_vec)
+    trait_names <- colnames(resolved$theta)
+    if(is.null(trait_names)) trait_names <- rep("", spec$p)
+    tip_labels <- spec$tree$tip.label
+    error_vec <- .mvSIMMAP_error_vector(error, n=spec$n, p=spec$p, tip_labels=tip_labels, trait_names=trait_names)
+    V <- built$V
+    if(!is.null(error_vec)){
+        diag(V) <- diag(V) + error_vec
+    }
+    if(nsim == 1L){
+        traits <- matrix(rmvnorm_simul(n=1, mean=mean_vec, var=V, method=method), ncol=spec$p)
+        rownames(traits) <- tip_labels
+        colnames(traits) <- trait_names
+        return(traits)
+    }
+    if(spec$p != 1L){
+        return(lapply(seq_len(nsim), function(i){
+            traits <- matrix(rmvnorm_simul(n=1, mean=mean_vec, var=V, method=method), ncol=spec$p)
+            rownames(traits) <- tip_labels
+            colnames(traits) <- trait_names
+            traits
+        }))
+    }
+    traits <- matrix(rmvnorm_simul(n=nsim, mean=mean_vec, var=V, method=method), ncol=nsim)
+    rownames(traits) <- tip_labels
+    traits
 }

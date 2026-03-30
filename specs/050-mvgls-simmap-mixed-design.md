@@ -30,11 +30,13 @@ This is a forward-looking design note. The currently implemented public mixed-pr
 - An experimental standalone `mvSIMMAP()` fitter now exists in `R/mvSIMMAP.r`.
 - `mvSIMMAP()` accepts a painted SIMMAP tree plus a per-regime process assignment among `BM`, `OU`, `OUM`, and `EB`.
 - `mvSIMMAP()` also accepts `process.groups`, so painted regimes can either keep separate parameter blocks or share common process blocks.
+- `mvSIMMAP(..., data = NULL, optimization = "fixed", param = list(ntraits = ...))` can now act as a simulation scaffold for mixed-process SIMMAP models.
 - For `OU`, shared `process.groups` collapse painted regimes into one OU regime for the likelihood, with shared `alpha`, `sigma`, and `theta`.
 - For `OUM`, shared `process.groups` share OU dynamics while retaining painted-regime-specific optima.
 - Internally, `mvSIMMAP()` builds a dense vectorized design matrix `D` and a dense covariance matrix `V`, then evaluates the likelihood through `loglik_mvmorph()`.
 - Optimized `mvSIMMAP()` fits now expose `LogLik` as a standard `logLik` object, so generic tools like `BIC()` work without changing the wider `mvMORPH` comparison machinery.
 - Fitted objects now also carry richer post-fit diagnostics, including Hessian status labels and optional jittered-restart metadata.
+- `simulate()` on `mvSIMMAP` objects now reuses that dense mixed-model structure to generate multivariate Gaussian draws under the fitted or manually overridden mixed-process parameterization.
 - `mvgls()` currently supports formula-based regression with a shared trait covariance and a smaller menu of phylogenetic row-covariance models.
 - Existing `mvgls` `OUM` support is the closest precedent: it augments the design matrix with regime-weight columns and estimates a scalar OU strength parameter.
 - PCMFit and PCMBase are not just analogous here; they are the main conceptual source for the mixed-Gaussian branchwise formulation used in this fork's `mvSIMMAP()` work. What was borrowed is the modeling idea of composing branch-local Gaussian transitions across mapped segments. What was not borrowed is their implementation code or their pruning engine.
@@ -45,7 +47,9 @@ This is a forward-looking design note. The currently implemented public mixed-pr
 ### Public API
 
 - There is no `mvgls` API yet for mixed BM/OU/OUM/EB SIMMAP models.
-- The only mixed-process entry point at the moment is `mvSIMMAP(tree, data, process, ...)`.
+- The current mixed-process fitting entry point is `mvSIMMAP(tree, data, process, ...)`.
+- The current mixed-process simulation entry point is `simulate(mvSIMMAP_object, ...)`.
+- There is still no direct `mvSIM(..., model="SIMMAPmixed")` selector.
 
 ### Internal implementation
 

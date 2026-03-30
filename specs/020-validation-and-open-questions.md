@@ -63,8 +63,15 @@ That regression file currently covers:
 - BM/BMM, OU/OUM, and EB special-case likelihood equivalence where the standalone fitter overlaps existing model families
 - `process.groups` semantics for shared OU, OUM, and EB parameter blocks
 - compact summary/print behavior, Hessian diagnostics, retry handling, and standard `logLik` / `BIC()` compatibility
+- scaffold-based mixed-process simulation through `simulate(mvSIMMAP_object, ...)`, including manual parameter overrides and `data=NULL` fixed-scaffold construction
 
 There is not yet a larger simulation campaign or summary report for `mvSIMMAP()` comparable to the OUM and corrpower workstreams.
+
+What changed recently:
+
+- mixed-process SIMMAP simulation is now available through `simulate()` on `mvSIMMAP` objects
+- `mvSIMMAP(..., data = NULL, optimization = "fixed", ...)` can now be used as a lightweight simulation scaffold constructor
+- `mvSIM()` itself is still limited to the legacy single-family model selectors and is not yet a direct mixed-process SIMMAP simulator
 
 ### Documentation
 

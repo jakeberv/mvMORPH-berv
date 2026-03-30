@@ -438,3 +438,162 @@ test_that("mvSIMMAP optimized fits expose a standards-compatible logLik object",
         log(attr(fit$LogLik, "nobs")) * attr(fit$LogLik, "df")
     expect_equal(as.numeric(BIC(fit)), bic_expected)
 })
+
+test_that("simulate() can draw from a mixed mvSIMMAP scaffold with manual overrides", {
+    tree <- make_two_regime_simmap(seed=21, n=8)
+
+    scaffold <- mvSIMMAP(
+        tree, data=NULL,
+        process=c(A="OU", B="EB"),
+        process.groups=c(A="ou_shared", B="eb_shared"),
+        param=list(ntraits=2, names_traits=c("y1", "y2")),
+        method="inverse",
+        optimization="fixed",
+        echo=FALSE
+    )
+
+    override <- list(
+        theta=list(
+            root=c(0.2, -0.1),
+            "theta.ou_shared"=c(0.7, -0.4)
+        ),
+        sigma=list(
+            ou_shared=diag(c(0.05, 0.08)),
+            eb_shared=diag(c(0.09, 0.12))
+        ),
+        alpha=list(
+            ou_shared=diag(c(1.2, 0.6))
+        ),
+        beta=c(eb_shared=-0.25)
+    )
+
+    spec <- mvMORPH:::.mvSIMMAP_extract_spec(scaffold)
+    resolved <- mvMORPH:::.mvSIMMAP_simulation_values(scaffold, spec, param=override)
+    built <- mvMORPH:::.mvSIMMAP_build_model(spec, resolved$values)
+    expected_mean <- as.numeric(built$D %*% as.numeric(t(resolved$theta)))
+
+    set.seed(101)
+    expected <- matrix(
+        mvMORPH:::rmvnorm_simul(n=1, mean=expected_mean, var=built$V, method="cholesky"),
+        ncol=2
+    )
+    rownames(expected) <- spec$tree$tip.label
+    colnames(expected) <- colnames(resolved$theta)
+
+    actual <- simulate(scaffold, nsim=1, seed=101, param=override)
+
+    expect_equal(actual, expected)
+})
+
+test_that("simulate() supports single-group scalar overrides and error inflation", {
+    tree <- make_single_regime_simmap(ape::rtree(6), regime="A")
+
+    scaffold <- mvSIMMAP(
+        tree, data=NULL,
+        process=c(A="OU"),
+        param=list(ntraits=1, names_traits="y"),
+        method="inverse",
+        optimization="fixed",
+        echo=FALSE
+    )
+
+    override <- list(
+        theta=c(root=0.3, "theta.A"=-0.2),
+        sigma=matrix(0.15, 1, 1),
+        alpha=matrix(0.8, 1, 1)
+    )
+    error_mat <- matrix(seq_len(ape::Ntip(tree)) * 0.01, ncol=1,
+                        dimnames=list(tree$tip.label, "y"))
+
+    spec <- mvMORPH:::.mvSIMMAP_extract_spec(scaffold)
+    resolved <- mvMORPH:::.mvSIMMAP_simulation_values(scaffold, spec, param=override)
+    built <- mvMORPH:::.mvSIMMAP_build_model(spec, resolved$values)
+    expected_mean <- as.numeric(built$D %*% as.numeric(t(resolved$theta)))
+    V_error <- built$V
+    diag(V_error) <- diag(V_error) + as.numeric(error_mat)
+
+    set.seed(202)
+    expected <- matrix(
+        mvMORPH:::rmvnorm_simul(n=1, mean=expected_mean, var=V_error, method="cholesky"),
+        ncol=1
+    )
+    rownames(expected) <- spec$tree$tip.label
+    colnames(expected) <- colnames(resolved$theta)
+
+    actual <- simulate(scaffold, nsim=1, seed=202, param=override, error=error_mat)
+
+    expect_equal(actual, expected)
+})
+
+test_that("simulate() on mvSIMMAP scaffolds follows mvSIM return conventions", {
+    tree <- make_two_regime_simmap(seed=22, n=8)
+
+    scaffold_multi <- mvSIMMAP(
+        tree, data=NULL,
+        process=c(A="OUM", B="EB"),
+        process.groups=c(A="ou_shared", B="eb_shared"),
+        param=list(ntraits=2, names_traits=c("y1", "y2")),
+        method="inverse",
+        optimization="fixed",
+        echo=FALSE
+    )
+
+    sims_multi <- simulate(scaffold_multi, nsim=3, seed=303)
+    expect_true(is.list(sims_multi))
+    expect_length(sims_multi, 3)
+    expect_identical(dim(sims_multi[[1]]), c(ape::Ntip(tree), 2L))
+    expect_identical(rownames(sims_multi[[1]]), tree$tip.label)
+    expect_identical(colnames(sims_multi[[1]]), c("y1", "y2"))
+
+    tree_uni <- make_single_regime_simmap(ape::rtree(6), regime="A")
+
+    scaffold_uni <- mvSIMMAP(
+        tree_uni, data=NULL,
+        process=c(A="EB"),
+        param=list(ntraits=1, names_traits="y"),
+        method="inverse",
+        optimization="fixed",
+        echo=FALSE
+    )
+
+    sims_uni <- simulate(scaffold_uni, nsim=4, seed=404)
+    expect_true(is.matrix(sims_uni))
+    expect_identical(dim(sims_uni), c(ape::Ntip(tree_uni), 4L))
+    expect_identical(rownames(sims_uni), tree_uni$tip.label)
+})
+
+test_that("mvSIMMAP fixed scaffolds can be created without data", {
+    tree <- make_two_regime_simmap(seed=23, n=8)
+
+    scaffold <- mvSIMMAP(
+        tree, data=NULL,
+        process=c(A="OU", B="EB"),
+        process.groups=c(A="ou_shared", B="eb_shared"),
+        param=list(ntraits=2, names_traits=c("trait1", "trait2")),
+        method="inverse",
+        optimization="fixed",
+        echo=FALSE
+    )
+
+    expect_s3_class(scaffold, "mvmorph.mixed")
+    expect_identical(dim(scaffold$theta), c(2L, 2L))
+    expect_identical(rownames(scaffold$theta), c("root", "theta.ou_shared"))
+    expect_identical(colnames(scaffold$theta), c("trait1", "trait2"))
+    expect_identical(scaffold$param$ntraits, 2L)
+    expect_identical(scaffold$param$nbspecies, ape::Ntip(tree))
+})
+
+test_that("mvSIMMAP still requires data outside fixed scaffold mode", {
+    tree <- make_single_regime_simmap(ape::rtree(6), regime="A")
+
+    expect_error(
+        mvSIMMAP(
+            tree, data=NULL,
+            process=c(A="OU"),
+            method="inverse",
+            optimization="L-BFGS-B",
+            echo=FALSE
+        ),
+        "unless optimization=\\\"fixed\\\""
+    )
+})

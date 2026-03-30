@@ -22,7 +22,7 @@ mvSIMMAP(tree, data, process, process.groups = NULL, error = NULL,
 Phylogenetic tree of class \code{"simmap"} with mapped regimes in \code{tree$maps} and \code{tree$mapped.edge}.
 }
   \item{data}{
-Matrix or data frame with species in rows and continuous traits in columns.
+Matrix or data frame with species in rows and continuous traits in columns. When \code{optimization="fixed"}, \code{data} can also be \code{NULL} to build a simulation scaffold without observed traits; in that case provide \code{param$ntraits} or enough matrix-valued parameter information for \code{mvSIMMAP} to infer the trait dimension.
 }
   \item{process}{
 Named character vector assigning each SIMMAP regime to one of \code{"BM"}, \code{"OU"}, \code{"OUM"}, or \code{"EB"}. If unnamed, it must have one entry per column of \code{tree$mapped.edge}. \code{"OU"} uses one optimum per process group, whereas \code{"OUM"} keeps a separate optimum for each painted regime.
@@ -34,7 +34,7 @@ Optional named character vector controlling which painted regimes share dynamic 
 Optional measurement-error variances supplied in the same format used by the other \code{mvMORPH} fitters.
 }
   \item{param}{
-List of starting values and tuning options. \code{sigma} can be a matrix/vector reused across process groups or a list keyed by process group or regime. \code{alpha} is used only for OU or OUM groups. \code{beta} is used only for EB groups. \code{low} and \code{up} optionally specify lower and upper bounds for EB \code{beta} values. The root state and OU optima are estimated analytically by GLS rather than supplied as starting values.
+List of starting values and tuning options. \code{sigma} can be a matrix/vector reused across process groups or a list keyed by process group or regime. \code{alpha} is used only for OU or OUM groups. \code{beta} is used only for EB groups. \code{low} and \code{up} optionally specify lower and upper bounds for EB \code{beta} values. The root state and OU optima are estimated analytically by GLS rather than supplied as starting values. For fixed scaffolds built with \code{data=NULL}, \code{param$ntraits} and optional \code{param$names_traits} can be used to declare the trait layout explicitly.
 }
   \item{method}{
 Likelihood evaluation method. The current implementation supports only dense methods: \code{"rpf"}, \code{"inverse"}, and \code{"pseudoinverse"}.
@@ -67,6 +67,10 @@ By default, each painted regime gets its own dynamic parameter block. Supplying 
 Printed model objects show the estimated parameter matrices in detail. Calling \code{summary()} on a fitted \code{mvSIMMAP} object gives a more compact structural view listing the painted regimes, process groups, theta ownership, and the names of the estimated parameter blocks. EB beta values printed at or extremely near zero are annotated as the BM boundary for readability.
 
 The post-fit Hessian check is slightly more informative than the older binary \code{mvMORPH} diagnostic used in some other fitters. Tiny negative eigenvalues inside \code{hessian.tol} are treated as numerical noise, nearly zero eigenvalues are reported as a flat or boundary solution, and clearly negative eigenvalues are reported as a possible saddle point. When \code{retry.unreliable = TRUE}, the function can automatically try a small number of jittered restarts and keep the best retained solution.
+
+Fixed or optimized \code{mvSIMMAP} objects can also be used as scaffolds for \code{simulate()}. The simulator reuses the fitted tree, \code{process}, and \code{process.groups} structure from the object and, when needed, accepts a \code{param=list(...)} override with replacement values for \code{theta}, \code{sigma}, \code{alpha}, and \code{beta}. This mixed-model simulation path is currently tied to the scaffold's original tree rather than supporting a new \code{tree=} override.
+
+For simulation-first workflows, \code{mvSIMMAP(tree, data=NULL, optimization="fixed", ...)} can be used as a lightweight scaffold constructor. Internally this creates a zero-valued placeholder dataset only to establish dimensions and default parameter blocks; the resulting object is intended mainly for \code{simulate()} rather than for likelihood-based inference.
 }
 \value{
 \item{LogLik }{The log-likelihood of the fitted model, stored as a standard \code{"logLik"} object with \code{df} and \code{nobs} attributes for compatibility with generic comparison tools such as \code{BIC()}.}
