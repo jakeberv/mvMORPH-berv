@@ -43,7 +43,7 @@ For a new thread, read these first:
 - `specs/050-mvgls-simmap-mixed-design.md`
   - design constraints, current standalone `mvSIMMAP()` behavior, and open questions for mixed BM/OU/OUM/EB SIMMAP support in `mvgls`
 - `specs/060-mvSIMMAP-simulation-validation.md`
-  - current exact-tree local benchmark results for standalone `mvSIMMAP()` simulation and parameter recovery, including 1D/2D/3D runs and `rpf` versus `inverse` timing
+  - current exact-tree local benchmark results for standalone `mvSIMMAP()` simulation and parameter recovery, including 1D/2D/3D runs, shared-OUM checks, the mixed `BM + EB + OUM` benchmark, and `rpf` versus `inverse` timing
 - `specs/TEMPLATE.md`
   - starting point for future specs
 

@@ -311,6 +311,98 @@ Interpretation:
 - it improved the hardest overestimated alpha dimension from the diagonal fit, even though it necessarily forces all traitwise OU pull strengths within a process group to be equal
 - this result motivated changing the public default OU/OUM alpha parameterization to `scalarPositive`
 
+### 3D exact-tree mixed `BM + EB + OUM` benchmark
+
+An additional exact-tree benchmark was then added to fold in an `EB` process alongside a multivariate `OUM` clade. The reusable driver lives in:
+
+- `tests/experimental_mvsimmap_oum_eb_benchmark.R`
+
+Setup:
+
+- tree generator: `phytools::pbtree(n = 100, scale = 1)`
+- tree seed after search: `20260330`
+- total tips: `100`
+- background regime `A = BM`
+- derived regime `B = EB`
+- derived regime `C = OUM`
+- fitted tree: exact matched SIMMAP tree
+- derived `EB` clade size: `40`
+- derived `OUM` clade size: `16`
+- method: `rpf`
+- alpha decomposition: `scalarPositive`
+- replicates: `4`
+- elapsed time on 4 cores: about `684.6` seconds
+
+Generating parameters:
+
+- `theta.C = (1.25, -0.75, 0.9)`
+- `beta.B = -2.0`
+- `sigma_A =`
+
+```text
+[ 0.045  0.013  0.009
+  0.013  0.036  0.011
+  0.009  0.011  0.028 ]
+```
+
+- `sigma_B =`
+
+```text
+[ 0.060  0.018  0.012
+  0.018  0.046  0.014
+  0.012  0.014  0.034 ]
+```
+
+- `sigma_C =`
+
+```text
+[ 0.030  0.009  0.006
+  0.009  0.023  0.007
+  0.006  0.007  0.018 ]
+```
+
+- `alpha_C = 2.5 I`
+
+Model comparison set:
+
+- true mixed model: `A = BM`, `B = EB`, `C = OUM`
+- no-EB mixed alternative: `A = BM`, `B = BM`, `C = OUM`
+- no-OUM mixed alternative: `A = BM`, `B = EB`, `C = BM`
+- painted `BMM`
+- global `BM1`
+
+Results:
+
+- mean `AIC_true = -877.8924`
+- mean `AIC_no_EB = -875.3299`
+- mean `AIC_no_OUM = -805.5105`
+- mean `AIC_BMM = -802.9069`
+- mean `AIC_BM1 = -694.0155`
+- mean `delta_AIC_no_EB_minus_true = 2.5626`
+- mean `delta_AIC_no_OUM_minus_true = 72.3819`
+- mean `delta_AIC_BMM_minus_true = 74.9855`
+- mean `delta_AIC_BM1_minus_true = 183.8769`
+- true model wins: `3/4`
+- true model beats the no-EB alternative by more than 2 AIC units in `2/4` replicates
+- all `4/4` true-model fits converged with reliable Hessians
+
+Selected recovery results:
+
+- mean `theta.C = (1.0664, -0.6577, 0.7489)`
+- mean `beta.B = -1.7898`
+- `beta.B` RMSE: `1.2540`
+- mean `sigma_A` stayed close to truth overall
+- mean `sigma_B` and `sigma_C` were somewhat noisy but still broadly informative
+- mean `alpha_C = 7.3098` with RMSE `6.7242`
+
+Interpretation:
+
+- this benchmark shows that `mvSIMMAP()` can fit a genuinely mixed `BM + EB + OUM` exact-tree scenario and usually prefers that generating model to simpler all-BM or no-OUM alternatives
+- the `OUM` component is much easier to distinguish than the `EB` component in this setup
+- the no-EB alternative remained competitive, and in one replicate the fitted `EB` exponent hit the `0` boundary, making the fit effectively collapse back to a BM-like regime
+- even in this benchmark with the newer scalar-alpha default, the OUM pull parameter remained the hardest part of the model to recover cleanly
+- so the current takeaway is that adding `EB` is workable, but discriminating `EB` from a regime-specific BM block still appears weaker than discriminating `OUM` from BM in the same exact-tree workflow
+
 ## What We Have Learned So Far
 
 ### Estimation behavior
@@ -319,11 +411,13 @@ Interpretation:
 - The current mixed fitter uses one global GLS-estimated root vector, corresponding to the fixed-root side of the older `mvOU` semantics rather than the stationary/random-root variants.
 - In the canonical mixed `BM -> OU` simulation, the fitted mixed model is decisively favored over a global `BM1` alternative by AIC.
 - In the more complex shared-OUM benchmark, the generating shared-dynamics model is recoverable and is favored over both all-BM alternatives and a separate-dynamics mixed alternative.
+- In the `BM + EB + OUM` benchmark, the full generating model is usually preferred and strongly outperforms the no-OUM and all-BM alternatives, but the no-EB alternative can remain competitive when the fitted `EB` exponent collapses toward `0`.
 - The easiest parameters to recover in these local checks were:
   - `theta`
   - background `BM` covariance terms
 - Derived-regime `OU` covariance terms were somewhat biased upward but still broadly informative.
 - Derived-regime `OU` pull parameters (`alpha`) were consistently the hardest parameters to recover.
+- In the local `EB` benchmark, the `EB` rate exponent (`beta`) was recoverable in the aggregate but noticeably noisier and more boundary-prone than the mean/covariance terms.
 - A scalar OU/OUM pull parameterization (`alpha = a I` by process group) can be a very good default compromise: much faster, often more stable, and sometimes even slightly better by AIC than a richer diagonal-alpha fit.
 - Increasing trait dimension helped some `alpha` components, but did not remove the classic `alpha` / `sigma` confounding ridge.
 
@@ -336,6 +430,7 @@ Interpretation:
 - `tests/experimental_mvsimmap_recovery_benchmark.R` now also accepts `MVSIMMAP_BENCH_ALPHA_DECOMP`, defaulting to the public `scalarPositive` alpha setting.
 - That benchmark driver now includes a built-in global `BM1` baseline and prints per-replicate and summary AIC comparisons.
 - `tests/experimental_mvsimmap_shared_ou_benchmark.R` provides a reusable 3-regime shared-OUM benchmark and accepts `MVSIMMAP_SHARED_BENCH_ALPHA_DECOMP`, defaulting to `scalarPositive`.
+- `tests/experimental_mvsimmap_oum_eb_benchmark.R` provides a reusable 3-regime `BM + EB + OUM` benchmark with exact-tree refits and prints both model-comparison and recovery summaries.
 - The new compact multivariate summary output is useful for debugging and for reading 2D/3D fits without digging through raw matrices.
 - `parameters(fit)` is useful for flattening multivariate estimates into a simulation-summary table; `fit$sigma`, `fit$alpha`, and `coef(fit)` remain the right interfaces when full matrices are desired.
 
@@ -365,6 +460,7 @@ For future local `mvSIMMAP()` simulation checks:
 
 - How much better does `alpha` recovery get with larger trees and more derived-regime tips?
 - How sensitive are these results to shift depth and derived-clade placement?
+- How much EB signal is needed before the mixed fitter reliably distinguishes `EB` from a regime-specific BM block instead of collapsing `beta` to `0`?
 - How much does recovery degrade when the painted SIMMAP tree is not exact?
 - Should a reusable `tests/reports/` markdown summary be generated from these local matched-tree campaigns?
 - Is it worth adding a lighter-weight scripted benchmark so future method changes can be checked without rerunning the full 3D batch?
@@ -374,6 +470,7 @@ For future local `mvSIMMAP()` simulation checks:
 - `R/mvSIMMAP.r`
 - `tests/testthat/test-mvSIMMAP.R`
 - `tests/experimental_mvsimmap_recovery_benchmark.R`
+- `tests/experimental_mvsimmap_oum_eb_benchmark.R`
 - `man/mvSIMMAP.Rd`
 - `man/parameters.Rd`
 - `specs/020-validation-and-open-questions.md`

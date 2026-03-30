@@ -79,7 +79,8 @@ What changed recently:
 - `mvSIMMAP(..., data = NULL, optimization = "fixed", ...)` can now be used as a lightweight simulation scaffold constructor
 - the default OU/OUM alpha decomposition is now `scalarPositive`, with `diagonalPositive` and `cholesky` available as opt-in richer alternatives
 - the current mixed fitter uses one global GLS-estimated root vector, corresponding to the fixed-root side of the older `mvOU` root semantics
-- reusable exact-tree benchmark drivers now exist for both the canonical `BM -> OU` case and the shared-OUM case
+- reusable exact-tree benchmark drivers now exist for the canonical `BM -> OU` case, the shared-OUM case, and a mixed `BM + EB + OUM` case
+- in the first exact-tree `BM + EB + OUM` checks, the `OUM` signal was much easier to distinguish than the `EB` signal; `EB` can still collapse toward its `beta = 0` BM boundary in some replicates even when the generating model includes a stronger `EB` regime
 - `mvSIM()` itself is still limited to the legacy single-family model selectors and is not yet a direct mixed-process SIMMAP simulator
 
 ### Documentation
@@ -140,6 +141,7 @@ Operational runbooks for resuming simulation work now live in:
 
 - How much of the current `mvSIMMAP()` surface needs simulation-based validation beyond the existing regression tests?
 - Which moderate tree sizes and trait dimensions remain practical under the dense likelihood implementation?
+- How strong and how deep does an `EB` regime need to be before the mixed fitter reliably prefers `EB` over a regime-specific BM block instead of letting `beta` collapse to `0`?
 - How much shared helper logic should be extracted before any `mvgls` integration work begins?
 
 ## Recommended Next Checks Before Big New Work
@@ -159,10 +161,11 @@ If working on `mvSIMMAP()` or mixed-process SIMMAP docs/logic, also run:
 
 6. `Rscript -e 'testthat::test_local(".", filter = "mvSIMMAP", reporter = "summary")'`
 7. `MVSIMMAP_BENCH_REPS=1 Rscript tests/experimental_mvsimmap_recovery_benchmark.R`
+8. `MVSIMMAP_OUM_EB_BENCH_REPS=1 Rscript tests/experimental_mvsimmap_oum_eb_benchmark.R`
 
 If working on OUM simulation logic, also run:
 
-8. a tiny env-restricted smoke run of `tests/experimental_oum_theta_recovery_grid.R`
+9. a tiny env-restricted smoke run of `tests/experimental_oum_theta_recovery_grid.R`
 
 ## Notes For New Threads
 
