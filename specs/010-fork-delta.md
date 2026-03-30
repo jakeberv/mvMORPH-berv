@@ -1,4 +1,4 @@
-# Fork Delta: OUM And Experimental BMM Work
+# Fork Delta: OUM, Experimental BMM, And mvSIMMAP
 
 ## Purpose
 
@@ -7,12 +7,12 @@ This spec is the main onboarding document for future threads. It describes, in o
 ## Status
 
 - Status: active
-- Last updated: 2026-03-26
-- Applies to branch: `master`
+- Last updated: 2026-03-30
+- Applies to branch: `codex/mvsimmap-mixed-model`
 
 ## Executive Summary
 
-Since the fork diverged from upstream/master, two major workstreams were built and then merged back together:
+Since the fork diverged from upstream/master, three major workstreams were built:
 
 1. `mvgls` OUM support was extended so user-supplied covariates are retained alongside regime optima, and that work was backed by new validation and simulation harnesses.
 2. A substantial experimental BMM correlation-aware modeling line was developed:
@@ -21,12 +21,14 @@ Since the fork diverged from upstream/master, two major workstreams were built a
    - was replaced by `corrpower`
    - then stabilized
    - then extended with a simpler correlation-only nested mode using `bmm.scale=FALSE`
+3. An experimental standalone `mvSIMMAP()` fitter was added for painted SIMMAP trees with mixed `BM`, `OU`, `OUM`, and `EB` regime assignments, along with improved summaries, post-fit diagnostics, and standards-compatible likelihood output.
 
 The current integrated recommendation is:
 
 - for OUM work, use the merged covariate-capable `mvgls(..., model="OUM")` path
 - for experimental BMM correlation-aware work, use `bmm.structure="corrpower"`
 - for the nested correlation-only variant, use `bmm.structure="corrpower", bmm.scale=FALSE`
+- for mixed-process painted-tree work, use the standalone `mvSIMMAP()` fitter on this branch
 
 ## Baseline
 
@@ -34,7 +36,7 @@ Relative to current `origin/master` / `upstream/master`:
 
 - baseline commit: `65228fc` `Update NAMESPACE`
 
-The local `master` now includes all merged work described below.
+The current branch includes all work described below.
 
 ## Workstream 1: OUM Covariates And Validation
 
@@ -172,6 +174,53 @@ Key milestones:
 - `4e2ebc0` `Add experimental corrpower correlation-only BMM mode`
 - `dc3ddaa` `Simplify corrpower correlation-only API`
 
+## Workstream 3: Experimental `mvSIMMAP()` Mixed-Process Fitter
+
+### What Changed
+
+This branch added an experimental standalone `mvSIMMAP()` fitter for painted `simmap` trees. The fitter allows each painted regime to be assigned one of `BM`, `OU`, `OUM`, or `EB`, then composes branch-local Gaussian transitions across mapped segments inside `mvMORPH`'s dense likelihood machinery.
+
+The implementation was conceptually inspired by PCMBase/PCMFit's branchwise mixed-Gaussian formulation, but it is not a code port and it does not reuse their pruning engine.
+
+### Main User-Facing Effect
+
+Users can now fit heterogeneous painted-tree models like:
+
+- `mvSIMMAP(tree, X, process = c(A="BM", B="OUM", C="EB"))`
+- `mvSIMMAP(tree, X, process = c(A="OU", B="OU"), process.groups = c(A="ou_shared", B="ou_shared"))`
+- `mvSIMMAP(tree, X, process = c(A="OUM", B="OUM"), process.groups = c(A="ou_shared", B="ou_shared"))`
+
+The important grouping semantics are:
+
+- `process` chooses the family for each painted regime
+- `process.groups` chooses which painted regimes share fitted process parameters
+- shared `OU` groups are treated as one OU regime for the likelihood, with shared `alpha`, `sigma`, and `theta`
+- shared `OUM` groups share OU dynamics but keep painted-regime-specific optima
+
+### Current Surface
+
+The current standalone `mvSIMMAP()` path now includes:
+
+- detailed `print()` and compact `summary()` methods
+- regime-summary output showing `process`, `process.group`, and `theta.owner`
+- richer Hessian diagnostics with labels such as `reliable`, `nearly flat/boundary`, and saddle-point warnings
+- optional jittered restarts for unreliable fits through `control=list(retry.unreliable=TRUE, ...)`
+- EB `beta` printing that annotates values at or near zero as the BM boundary
+- `LogLik` stored as a standard `logLik` object so generic tools like `BIC()` work directly on fitted objects
+
+### Important Files
+
+- `R/mvSIMMAP.r`
+- `man/mvSIMMAP.Rd`
+- `tests/testthat/test-mvSIMMAP.R`
+- `specs/050-mvgls-simmap-mixed-design.md`
+
+### Important Commit Landmarks
+
+- `efda128` `Add experimental SIMMAP mixed-process fitter`
+- `bad77a5` `Refine mvSIMMAP grouping semantics and summaries`
+- `9f7dfe2` `Improve mvSIMMAP diagnostics and fit-object compatibility`
+
 ## Current Experimental BMM Public Surface
 
 ### Supported
@@ -275,6 +324,13 @@ If a new thread is about OUM:
 - the merged `master` already includes the OUM covariate support work
 - the OUM simulation and summary-report infrastructure is already present under `tests/experimental_oum_*.R` and `tests/reports/`
 
+If a new thread is about mixed-process painted SIMMAP models:
+
+- the current branch already includes a standalone `mvSIMMAP()` fitter
+- read `man/mvSIMMAP.Rd` for the public surface
+- use `specs/050-mvgls-simmap-mixed-design.md` only for the planned `mvgls` integration path
+- do not assume that mixed-process SIMMAP support already exists inside `mvgls`
+
 ## New Thread Fast Start
 
 For the experimental BMM line, read these in order:
@@ -292,6 +348,13 @@ For the OUM line, read these in order:
 2. `tests/reports/oum_simulation_summary_report.md`
 3. `tests/experimental_oum_detectability_grid.R`
 4. `tests/experimental_oum_theta_recovery_grid.R`
+
+For the `mvSIMMAP` line, read these in order:
+
+1. `man/mvSIMMAP.Rd`
+2. `R/mvSIMMAP.r`
+3. `tests/testthat/test-mvSIMMAP.R`
+4. `specs/050-mvgls-simmap-mixed-design.md`
 
 ## Technical Debt To Keep In Mind
 

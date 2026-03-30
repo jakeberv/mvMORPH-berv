@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This spec captures the current design for bringing mixed BM/OU/EB regime support on painted SIMMAP trees into `mvgls` while preserving formula-based regression. It is meant to save a future thread from having to rediscover the architectural constraints, the likely first implementation shape, and the main technical risks.
+This spec captures the current design for bringing mixed BM/OU/OUM/EB regime support on painted SIMMAP trees into `mvgls` while preserving formula-based regression. It is meant to save a future thread from having to rediscover the architectural constraints, the likely first implementation shape, and the main technical risks.
 
 ## Status
 
@@ -13,7 +13,7 @@ This spec captures the current design for bringing mixed BM/OU/EB regime support
 ## Scope
 
 - In scope:
-  - a tentative `mvgls(..., model="SIMMAPmixed", process=...)` design
+  - a tentative `mvgls(..., model="SIMMAPmixed", process=..., process.groups=...)` design
   - a first-pass parameterization that fits the existing `mvgls` GLS architecture
   - integration points across `mvgls`, helper code, and penalized methods
   - expected validation work and open design questions
@@ -26,8 +26,13 @@ This spec captures the current design for bringing mixed BM/OU/EB regime support
 ## Background
 
 - An experimental standalone `mvSIMMAP()` fitter now exists in `R/mvSIMMAP.r`.
-- `mvSIMMAP()` accepts a painted SIMMAP tree plus a per-regime process assignment among `BM`, `OU`, and `EB`.
+- `mvSIMMAP()` accepts a painted SIMMAP tree plus a per-regime process assignment among `BM`, `OU`, `OUM`, and `EB`.
+- `mvSIMMAP()` also accepts `process.groups`, so painted regimes can either keep separate parameter blocks or share common process blocks.
+- For `OU`, shared `process.groups` collapse painted regimes into one OU regime for the likelihood, with shared `alpha`, `sigma`, and `theta`.
+- For `OUM`, shared `process.groups` share OU dynamics while retaining painted-regime-specific optima.
 - Internally, `mvSIMMAP()` builds a dense vectorized design matrix `D` and a dense covariance matrix `V`, then evaluates the likelihood through `loglik_mvmorph()`.
+- Optimized `mvSIMMAP()` fits now expose `LogLik` as a standard `logLik` object, so generic tools like `BIC()` work without changing the wider `mvMORPH` comparison machinery.
+- Fitted objects now also carry richer post-fit diagnostics, including Hessian status labels and optional jittered-restart metadata.
 - `mvgls()` currently supports formula-based regression with a shared trait covariance and a smaller menu of phylogenetic row-covariance models.
 - Existing `mvgls` `OUM` support is the closest precedent: it augments the design matrix with regime-weight columns and estimates a scalar OU strength parameter.
 - PCMFit and PCMBase are not just analogous here; they are the main conceptual source for the mixed-Gaussian branchwise formulation used in this fork's `mvSIMMAP()` work. What was borrowed is the modeling idea of composing branch-local Gaussian transitions across mapped segments. What was not borrowed is their implementation code or their pruning engine.
@@ -37,7 +42,7 @@ This spec captures the current design for bringing mixed BM/OU/EB regime support
 
 ### Public API
 
-- There is no `mvgls` API yet for mixed BM/OU/EB SIMMAP models.
+- There is no `mvgls` API yet for mixed BM/OU/OUM/EB SIMMAP models.
 - The only mixed-process entry point at the moment is `mvSIMMAP(tree, data, process, ...)`.
 
 ### Internal implementation
@@ -53,11 +58,12 @@ This spec captures the current design for bringing mixed BM/OU/EB regime support
 ## Proposed User API
 
 - Tentative entry point:
-  - `mvgls(formula, data, tree, model="SIMMAPmixed", process=..., ...)`
+  - `mvgls(formula, data, tree, model="SIMMAPmixed", process=..., process.groups=..., ...)`
 - Required inputs:
   - `tree`: a `simmap` object with `mapped.edge` and `maps`
-  - `process`: a named vector keyed by SIMMAP regime, with values in `c("BM", "OU", "EB")`
+  - `process`: a named vector keyed by SIMMAP regime, with values in `c("BM", "OU", "OUM", "EB")`
 - Likely optional inputs:
+  - `process.groups`: a named vector keyed by SIMMAP regime when shared process blocks are desired
   - SIMMAP-specific starting values and bounds through the existing `start`, `low`, `up`, or `param` conventions
   - `root` and `root_std`, following the current OUM semantics as closely as possible
 
@@ -213,3 +219,5 @@ Expected first-version limitations:
 - `R/fun.r`
 - `R/mvSIMMAP.r`
 - commit `efda128` (`Add experimental SIMMAP mixed-process fitter`)
+- commit `bad77a5` (`Refine mvSIMMAP grouping semantics and summaries`)
+- commit `9f7dfe2` (`Improve mvSIMMAP diagnostics and fit-object compatibility`)

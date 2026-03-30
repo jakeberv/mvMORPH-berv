@@ -40,7 +40,7 @@ For a new thread, read these first:
 - `specs/040-oum-simulation-runbook.md`
   - how to resume local or remote simulation work for the OUM extensions and model-selection studies
 - `specs/050-mvgls-simmap-mixed-design.md`
-  - design constraints, proposed architecture, and open questions for mixed BM/OU/EB SIMMAP support in `mvgls`
+  - design constraints, current standalone `mvSIMMAP()` behavior, and open questions for mixed BM/OU/OUM/EB SIMMAP support in `mvgls`
 - `specs/TEMPLATE.md`
   - starting point for future specs
 
@@ -50,7 +50,7 @@ These specs are intentionally focused on the work added in this fork:
 
 - `mvgls` OUM covariate support and associated validation
 - experimental BMM correlation-aware work, culminating in `corrpower`
-- the standalone `mvSIMMAP()` mixed-process fitter and the planned path toward `mvgls` integration
+- the standalone `mvSIMMAP()` mixed-process fitter, including grouping semantics and fit-object diagnostics, plus the planned path toward `mvgls` integration
 - simulation harnesses and summary reports added to support those changes
 
 They are not a replacement for:
