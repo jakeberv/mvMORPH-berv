@@ -4,10 +4,10 @@
 Experimental mixed-regime Gaussian models on SIMMAP trees
 }
 \description{
-Fits an experimental mixed-regime model on a painted SIMMAP tree where each mapped regime is assigned one of three process families: Brownian motion (BM), Ornstein-Uhlenbeck (OU), or Early-Burst (EB).
+Fits an experimental mixed-regime model on a painted SIMMAP tree where each mapped regime is assigned one of four process families: Brownian motion (BM), single-optimum Ornstein-Uhlenbeck (OU), multiple-optimum Ornstein-Uhlenbeck (OUM), or Early-Burst (EB).
 }
 \usage{
-mvSIMMAP(tree, data, process, error = NULL,
+mvSIMMAP(tree, data, process, process.groups = NULL, error = NULL,
          param = list(alpha = NULL, sigma = NULL, beta = NULL,
                       decomp = c("cholesky", "diagonal", "diagonalPositive"),
                       decompSigma = c("cholesky", "diagonal")),
@@ -25,13 +25,16 @@ Phylogenetic tree of class \code{"simmap"} with mapped regimes in \code{tree$map
 Matrix or data frame with species in rows and continuous traits in columns.
 }
   \item{process}{
-Named character vector assigning each SIMMAP regime to one of \code{"BM"}, \code{"OU"}, or \code{"EB"}. If unnamed, it must have one entry per column of \code{tree$mapped.edge}.
+Named character vector assigning each SIMMAP regime to one of \code{"BM"}, \code{"OU"}, \code{"OUM"}, or \code{"EB"}. If unnamed, it must have one entry per column of \code{tree$mapped.edge}. \code{"OU"} uses one optimum per process group, whereas \code{"OUM"} keeps a separate optimum for each painted regime.
+}
+  \item{process.groups}{
+Optional named character vector controlling which painted regimes share dynamic process parameters. By default, each regime forms its own group. Regimes assigned the same group label must share the same process family and will share the fitted \code{sigma}, \code{alpha}, and/or \code{beta} parameters for that family. For \code{"OU"}, sharing a group also shares the optimum, so the grouped regimes are treated as a single OU regime for the likelihood. For \code{"OUM"}, grouped regimes still keep separate painted-regime optima while sharing the OU dynamics.
 }
   \item{error}{
 Optional measurement-error variances supplied in the same format used by the other \code{mvMORPH} fitters.
 }
   \item{param}{
-List of starting values and tuning options. \code{sigma} can be a matrix/vector reused across regimes or a list keyed by regime. \code{alpha} is used only for OU regimes. \code{beta} is used only for EB regimes. \code{low} and \code{up} optionally specify lower and upper bounds for EB \code{beta} values. The root state and OU optima are estimated analytically by GLS rather than supplied as starting values.
+List of starting values and tuning options. \code{sigma} can be a matrix/vector reused across process groups or a list keyed by process group or regime. \code{alpha} is used only for OU or OUM groups. \code{beta} is used only for EB groups. \code{low} and \code{up} optionally specify lower and upper bounds for EB \code{beta} values. The root state and OU optima are estimated analytically by GLS rather than supplied as starting values.
 }
   \item{method}{
 Likelihood evaluation method. The current implementation supports only dense methods: \code{"rpf"}, \code{"inverse"}, and \code{"pseudoinverse"}.
@@ -53,21 +56,24 @@ Whether a fitted-model summary is printed.
 }
 }
 \details{
-This function implements a dense likelihood-based mixed-regime extension for painted SIMMAP trees. Each mapped branch segment is treated as a local Gaussian transition and the transitions are composed along each lineage. BM, OU, and EB regimes can therefore coexist on the same painted tree.
+This function implements a dense likelihood-based mixed-regime extension for painted SIMMAP trees. Each mapped branch segment is treated as a local Gaussian transition and the transitions are composed along each lineage. BM, OU, OUM, and EB regimes can therefore coexist on the same painted tree.
 
-The current implementation is experimental and is designed around \code{mvMORPH}'s existing dense likelihood machinery. It is conceptually close to the branchwise mixed-Gaussian strategy used by \code{PCMBase}/\code{PCMFit}, but it does not yet implement their linear-time pruning algorithm. Consequently, \code{mvSIMMAP} is best suited to moderate tree sizes.
+The current implementation is experimental and is designed around \code{mvMORPH}'s existing dense likelihood machinery. The underlying modeling idea was taken from the branchwise mixed-Gaussian formulation developed in \code{PCMBase}/\code{PCMFit}: branch-local Gaussian transitions are composed along the tree to handle changes in process type and parameters among mapped segments. This implementation is not a code port of \code{PCMBase}/\code{PCMFit}, and it does not yet implement their linear-time pruning algorithm. Consequently, \code{mvSIMMAP} is best suited to moderate tree sizes.
 
-The fitted mean parameters always include a root-state vector. Each OU regime contributes an additional regime-specific optimum vector. BM and EB regimes contribute only covariance/process parameters.
+By default, each painted regime gets its own dynamic parameter block. Supplying \code{process.groups} allows multiple painted regimes to share the same dynamic OU, OUM, BM, or EB parameters. The fitted mean parameters always include a root-state vector. For \code{"OU"}, each process group contributes a single optimum vector, so grouped painted regimes are collapsed into one OU regime for the likelihood. For \code{"OUM"}, each painted regime contributes its own optimum vector even when several regimes share the same OU dynamics. BM and EB regimes contribute only covariance/process parameters.
+
+Printed model objects show the estimated parameter matrices in detail. Calling \code{summary()} on a fitted \code{mvSIMMAP} object gives a more compact structural view listing the painted regimes, process groups, theta ownership, and the names of the estimated parameter blocks.
 }
 \value{
 \item{LogLik }{The log-likelihood of the fitted model.}
 \item{AIC }{Akaike Information Criterion.}
 \item{AICc }{Sample size-corrected AIC.}
-\item{theta }{Estimated mean parameters, including the root state and any OU regime optima.}
-\item{alpha }{Named list of OU pull matrices by regime.}
-\item{sigma }{Named list of regime-specific rate matrices.}
-\item{beta }{Named vector of EB beta values.}
+\item{theta }{Estimated mean parameters, including the root state and any OU/OUM optimum vectors.}
+\item{alpha }{Named list of OU/OUM pull matrices by process group.}
+\item{sigma }{Named list of process-group-specific rate matrices.}
+\item{beta }{Named vector of EB beta values by process group.}
 \item{process }{The normalized regime-to-process assignment vector used in the fit.}
+\item{process.groups }{The normalized regime-to-process-group assignment vector used in the fit.}
 \item{convergence }{Convergence status of the optimizing function.}
 \item{hess.values }{Basic Hessian reliability diagnostic.}
 \item{param }{List of fit metadata and internal parameterization functions.}
@@ -77,6 +83,8 @@ The fitted mean parameters always include a root-state vector. Each OU regime co
 Clavel J., Escarguel G., Merceron G. 2015. mvMORPH: an R package for fitting multivariate evolutionary models to morphometric data. Methods in Ecology and Evolution, 6(11):1311-1319.
 
 Mitov V., Bartoszek K., Asimomitis G., Stadler T. 2019. Fast likelihood calculation for multivariate Gaussian phylogenetic models with shifts. Theoretical Population Biology. 131:66-78.
+
+Mitov V., Bartoszek K., Stadler T. PCMBase and PCMFit project documentation. The mixed-Gaussian branchwise formulation in these projects was the main conceptual inspiration for the present \code{mvSIMMAP} implementation.
 }
 \author{
 Julien Clavel; experimental SIMMAP mixed-model extension in this branch.
@@ -106,6 +114,26 @@ fit <- mvSIMMAP(
   param = list(
     sigma = list(A = diag(2) * 0.05, B = diag(2) * 0.2),
     alpha = list(A = diag(2))
+  )
+)
+
+fit_shared_ou <- mvSIMMAP(
+  tree, X,
+  process = c(A = "OU", B = "OU"),
+  process.groups = c(A = "ou_shared", B = "ou_shared"),
+  param = list(
+    sigma = list(ou_shared = diag(2) * 0.1),
+    alpha = list(ou_shared = diag(2))
+  )
+)
+
+fit_shared_dynamics <- mvSIMMAP(
+  tree, X,
+  process = c(A = "OUM", B = "OUM"),
+  process.groups = c(A = "ou_shared", B = "ou_shared"),
+  param = list(
+    sigma = list(ou_shared = diag(2) * 0.1),
+    alpha = list(ou_shared = diag(2))
   )
 )
 }

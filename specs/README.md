@@ -17,6 +17,7 @@ For a new thread, read these first:
 2. `specs/010-fork-delta.md`
 3. `specs/020-validation-and-open-questions.md`
 4. `specs/030-bmm-simulation-runbook.md` or `specs/040-oum-simulation-runbook.md`, depending on the workstream
+5. `specs/050-mvgls-simmap-mixed-design.md` when working on mixed-process SIMMAP support in `mvgls`
 
 ## Conventions
 
@@ -38,6 +39,8 @@ For a new thread, read these first:
   - how to resume local or remote simulation work for the experimental corrpower BMM family
 - `specs/040-oum-simulation-runbook.md`
   - how to resume local or remote simulation work for the OUM extensions and model-selection studies
+- `specs/050-mvgls-simmap-mixed-design.md`
+  - design constraints, proposed architecture, and open questions for mixed BM/OU/EB SIMMAP support in `mvgls`
 - `specs/TEMPLATE.md`
   - starting point for future specs
 
@@ -47,6 +50,7 @@ These specs are intentionally focused on the work added in this fork:
 
 - `mvgls` OUM covariate support and associated validation
 - experimental BMM correlation-aware work, culminating in `corrpower`
+- the standalone `mvSIMMAP()` mixed-process fitter and the planned path toward `mvgls` integration
 - simulation harnesses and summary reports added to support those changes
 
 They are not a replacement for:

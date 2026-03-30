@@ -3,6 +3,11 @@
 ##                           mvMORPH: mvSIMMAP                                ##
 ##                                                                            ##
 ## Experimental mixed-regime Gaussian models on SIMMAP trees                  ##
+## Conceptual acknowledgment: the branchwise local-Gaussian transition         ##
+## composition used here is inspired by the mixed-model formulation in         ##
+## PCMBase/PCMFit (Mitov et al. 2019). This file is not a port of their       ##
+## implementation; it rebuilds the idea inside mvMORPH's existing dense       ##
+## likelihood machinery.                                                      ##
 ##                                                                            ##
 ################################################################################
 
@@ -58,33 +63,72 @@
     if(any(is.na(process))){
         stop("The process vector must include every regime present in tree$mapped.edge", call.=FALSE)
     }
-    valid <- c("BM", "OU", "EB")
+    valid <- c("BM", "OU", "OUM", "EB")
     if(any(!process %in% valid)){
-        stop("Allowed process assignments are \"BM\", \"OU\", and \"EB\"", call.=FALSE)
+        stop("Allowed process assignments are \"BM\", \"OU\", \"OUM\", and \"EB\"", call.=FALSE)
     }
     structure(process, names=regime_names)
 }
 
-.mvSIMMAP_pick_list_value <- function(x, regime, regime_order){
-    if(is.null(x)) return(NULL)
-    if(!is.list(x)){
-        return(x)
+.mvSIMMAP_as_named_groups <- function(groups, regime_names, process){
+    if(is.null(groups)){
+        groups <- regime_names
+        names(groups) <- regime_names
+        return(structure(as.character(groups), names=regime_names))
     }
-    if(!is.null(names(x)) && regime %in% names(x)){
-        return(x[[regime]])
+    if(is.null(names(groups))){
+        if(length(groups) != length(regime_names)){
+            stop("The process.groups vector must either be named by SIMMAP regime or have one entry per regime", call.=FALSE)
+        }
+        names(groups) <- regime_names
     }
-    idx <- match(regime, regime_order)
-    if(is.na(idx) || idx > length(x)) return(NULL)
-    x[[idx]]
+    group_names <- names(groups)
+    groups <- as.character(groups)
+    names(groups) <- group_names
+    groups <- groups[regime_names]
+    if(any(is.na(groups)) || any(!nzchar(groups))){
+        stop("The process.groups vector must include a non-empty group label for every regime present in tree$mapped.edge", call.=FALSE)
+    }
+    family_by_group <- split(unname(process), groups)
+    invalid <- vapply(family_by_group, function(x) length(unique(x)) > 1L, logical(1))
+    if(any(invalid)){
+        stop("Each process.groups label must correspond to a single process family", call.=FALSE)
+    }
+    structure(groups, names=regime_names)
 }
 
-.mvSIMMAP_pick_beta_value <- function(x, regime, regime_order){
+.mvSIMMAP_pick_grouped_value <- function(x, regime, regime_order, group=NULL, group_order=NULL){
     if(is.null(x)) return(NULL)
     if(is.list(x)){
-        return(.mvSIMMAP_pick_list_value(x, regime, regime_order))
+        if(!is.null(names(x))){
+            if(!is.null(group) && group %in% names(x)){
+                return(x[[group]])
+            }
+            if(regime %in% names(x)){
+                return(x[[regime]])
+            }
+        }
+        if(!is.null(group_order) && length(x) == length(group_order)){
+            idx <- match(group, group_order)
+            if(!is.na(idx)) return(x[[idx]])
+        }
+        idx <- match(regime, regime_order)
+        if(is.na(idx) || idx > length(x)) return(NULL)
+        return(x[[idx]])
     }
-    if(!is.null(names(x)) && regime %in% names(x)){
-        return(x[[regime]])
+    if(!is.null(names(x))){
+        if(!is.null(group) && group %in% names(x)){
+            return(x[[group]])
+        }
+        if(regime %in% names(x)){
+            return(x[[regime]])
+        }
+    }
+    if(!is.null(group_order) && length(x) == length(group_order)){
+        idx <- match(group, group_order)
+        if(!is.na(idx)){
+            return(x[[idx]])
+        }
     }
     if(length(x) == length(regime_order)){
         idx <- match(regime, regime_order)
@@ -181,6 +225,7 @@
             )
         },
         "OU" = .mvSIMMAP_ou_transition(alpha=alpha, sigma=sigma, duration=duration),
+        "OUM" = .mvSIMMAP_ou_transition(alpha=alpha, sigma=sigma, duration=duration),
         stop("Unknown process type in internal SIMMAP transition builder", call.=FALSE)
     )
 }
@@ -242,22 +287,24 @@
     alpha <- list()
     sigma <- list()
     beta <- numeric(0)
-    for(regime in spec$regime_names){
-        type <- spec$process[[regime]]
-        if(type == "OU"){
+    for(group in spec$group_names){
+        type <- spec$group_process[[group]]
+        if(type %in% c("OU", "OUM")){
             alpha_par <- par[idx:(idx + spec$nalpha - 1)]
             idx <- idx + spec$nalpha
-            alpha[[regime]] <- spec$alphafun(alpha_par)$A
+            alpha[[group]] <- spec$alphafun(alpha_par)$A
         }
         sigma_par <- par[idx:(idx + spec$nsigma - 1)]
         idx <- idx + spec$nsigma
-        sigma[[regime]] <- spec$sigmafun(sigma_par)
+        sigma[[group]] <- spec$sigmafun(sigma_par)
         if(type == "EB"){
             beta <- c(beta, par[[idx]])
-            names(beta)[length(beta)] <- regime
+            names(beta)[length(beta)] <- group
             idx <- idx + 1L
         }
     }
+    if(length(alpha)) alpha <- alpha[spec$alpha_groups]
+    if(length(sigma)) sigma <- sigma[spec$group_names]
     beta <- structure(as.numeric(beta), names=names(beta))
     list(alpha=alpha, sigma=sigma, beta=beta)
 }
@@ -274,13 +321,13 @@
     V_nodes <- vector("list", n_total)
     state_nodes <- vector("list", n_total)
     A_nodes[[spec$root_node]] <- I_p
-    B_nodes[[spec$root_node]] <- if(length(spec$ou_regimes)){
-        lapply(seq_along(spec$ou_regimes), function(x) zero_p)
+    B_nodes[[spec$root_node]] <- if(length(spec$theta_labels)){
+        lapply(seq_along(spec$theta_labels), function(x) zero_p)
     }else{
         list()
     }
     V_nodes[[spec$root_node]] <- zero_p
-    state_nodes[[spec$root_node]] <- list(type=NULL, regime=NULL, eb_age=0)
+    state_nodes[[spec$root_node]] <- list(type=NULL, regime=NULL, group=NULL, eb_age=0)
     for(edge_index in seq_len(nrow(tree$edge))){
         parent <- tree$edge[edge_index, 1]
         child <- tree$edge[edge_index, 2]
@@ -288,7 +335,7 @@
             stop("Internal SIMMAP traversal error: parent node was not initialized", call.=FALSE)
         }
         A_curr <- A_nodes[[parent]]
-        B_curr <- if(length(spec$ou_regimes)){
+        B_curr <- if(length(spec$theta_labels)){
             lapply(B_nodes[[parent]], function(x) x)
         }else{
             list()
@@ -302,33 +349,35 @@
                 if(duration <= 0) next
                 regime <- edge_segments$regimes[[seg_idx]]
                 type <- spec$process[[regime]]
+                group <- spec$process_groups[[regime]]
                 eb_age <- if(type == "EB" &&
                              identical(state_curr$type, "EB") &&
-                             identical(state_curr$regime, regime)){
+                             identical(state_curr$group, group)){
                     state_curr$eb_age
                 }else{
                     0
                 }
                 trans <- .mvSIMMAP_transition(
                     type=type,
-                    sigma=values$sigma[[regime]],
+                    sigma=values$sigma[[group]],
                     duration=duration,
-                    alpha=if(type == "OU") values$alpha[[regime]] else NULL,
-                    beta=if(type == "EB") values$beta[[regime]] else NULL,
+                    alpha=if(type %in% c("OU", "OUM")) values$alpha[[group]] else NULL,
+                    beta=if(type == "EB") values$beta[[group]] else NULL,
                     eb_age=eb_age
                 )
                 A_curr <- trans$Phi %*% A_curr
                 if(length(B_curr)){
                     B_curr <- lapply(B_curr, function(mat) trans$Phi %*% mat)
                 }
-                if(type == "OU"){
-                    B_curr[[spec$ou_index[[regime]]]] <- B_curr[[spec$ou_index[[regime]]]] + trans$Theta
+                if(type %in% c("OU", "OUM")){
+                    slot <- spec$theta_by_regime[[regime]]
+                    B_curr[[slot]] <- B_curr[[slot]] + trans$Theta
                 }
                 V_curr <- .mvSIMMAP_symmetrize(trans$Phi %*% V_curr %*% t(trans$Phi) + trans$Q)
                 state_curr <- if(type == "EB"){
-                    list(type=type, regime=regime, eb_age=eb_age + duration)
+                    list(type=type, regime=regime, group=group, eb_age=eb_age + duration)
                 }else{
-                    list(type=type, regime=regime, eb_age=0)
+                    list(type=type, regime=regime, group=group, eb_age=0)
                 }
             }
         }
@@ -360,7 +409,146 @@
     theta_mat
 }
 
-mvSIMMAP <- function(tree, data, process, error=NULL,
+.mvSIMMAP_regime_summary <- function(process, process.groups=NULL){
+    regime_names <- names(process)
+    if(is.null(regime_names)) regime_names <- as.character(seq_along(process))
+    if(is.null(process.groups)){
+        process.groups <- structure(regime_names, names=regime_names)
+    }else{
+        process.groups <- process.groups[regime_names]
+    }
+    theta_owner <- vapply(regime_names, function(regime){
+        type <- unname(process[[regime]])
+        switch(type,
+            "OU" = unname(process.groups[[regime]]),
+            "OUM" = regime,
+            ""
+        )
+    }, character(1))
+    data.frame(
+        regime=regime_names,
+        process=unname(process[regime_names]),
+        process.group=unname(process.groups[regime_names]),
+        theta.owner=theta_owner,
+        check.names=FALSE,
+        stringsAsFactors=FALSE
+    )
+}
+
+.mvSIMMAP_print_object <- function(x){
+    cat("\n")
+    cat("-- Summary results for the experimental SIMMAP mixed model --", "\n")
+    if(!is.null(x$LogLik)){
+        cat("LogLikelihood:\t", x$LogLik, "\n")
+    }else{
+        cat("No optimization performed; object contains the default parameterization and log-likelihood function.", "\n")
+    }
+    if(!is.null(x$AIC)) cat("AIC:\t", x$AIC, "\n")
+    if(!is.null(x$AICc)) cat("AICc:\t", x$AICc, "\n")
+    if(!is.null(x$param[["nparam"]])) cat(x$param$nparam, "parameters", "\n")
+    cat("Regime summary", "\n")
+    cat("______________________", "\n")
+    print(.mvSIMMAP_regime_summary(x$process, x$process.groups), row.names=FALSE)
+    if(!is.null(x$theta)){
+        cat("\n")
+        cat("Estimated mean parameters", "\n")
+        cat("______________________", "\n")
+        print(x$theta)
+    }
+    if(length(x$alpha)){
+        cat("\n")
+        cat("OU/OUM alpha matrices (by process group)", "\n")
+        cat("______________________", "\n")
+        print(x$alpha)
+    }
+    if(length(x$sigma)){
+        cat("\n")
+        cat("Process-group sigma matrices", "\n")
+        cat("______________________", "\n")
+        print(x$sigma)
+    }
+    if(length(x$beta)){
+        cat("\n")
+        cat("EB beta values (by process group)", "\n")
+        cat("______________________", "\n")
+        print(x$beta)
+    }
+    invisible(x)
+}
+
+.mvSIMMAP_summary_object <- function(object){
+    regime_summary <- .mvSIMMAP_regime_summary(object$process, object$process.groups)
+    theta_labels <- if(!is.null(object$theta) && nrow(object$theta) > 1L) rownames(object$theta)[-1] else character(0)
+    alpha_groups <- names(object$alpha)
+    sigma_groups <- names(object$sigma)
+    beta_groups <- names(object$beta)
+    fit <- list(
+        optimized=!is.null(object$LogLik),
+        logLik=object$LogLik %||% NA_real_,
+        AIC=object$AIC %||% NA_real_,
+        AICc=object$AICc %||% NA_real_,
+        convergence=object$convergence %||% NA_integer_,
+        hessian_ok=if(!is.null(object$hess.values)) identical(object$hess.values, 0) else NA
+    )
+    dims <- list(
+        n=object$param$nbspecies %||% NA_integer_,
+        p=object$param$ntraits %||% NA_integer_,
+        nregimes=object$param$nregimes %||% nrow(regime_summary),
+        nprocess.groups=object$param$nprocess.groups %||% length(unique(regime_summary$process.group))
+    )
+    blocks <- list(
+        theta=theta_labels,
+        alpha=alpha_groups %||% character(0),
+        sigma=sigma_groups %||% character(0),
+        beta=beta_groups %||% character(0)
+    )
+    out <- list(
+        model=object$param$model %||% "SIMMAPmixed",
+        method=object$param$method %||% NA_character_,
+        optimization=object$param$optimization %||% NA_character_,
+        dimensions=dims,
+        fit=fit,
+        blocks=blocks,
+        regime.summary=regime_summary
+    )
+    class(out) <- "summary.mvmorph.mixed"
+    out
+}
+
+.mvSIMMAP_print_summary <- function(x){
+    cat("mvSIMMAP summary", "\n")
+    cat("Model:\t", x$model, "\n", sep="")
+    cat("Method:\t", x$method, "\n", sep="")
+    cat("Optimization:\t", x$optimization, "\n", sep="")
+    cat("Dimensions:\t", x$dimensions$n, " species, ", x$dimensions$p, " traits, ",
+        x$dimensions$nregimes, " painted regimes, ", x$dimensions$nprocess.groups, " process groups", "\n", sep="")
+    if(isTRUE(x$fit$optimized)){
+        cat("LogLik:\t", x$fit$logLik, "\n")
+        cat("AIC:\t", x$fit$AIC, "\n")
+        cat("AICc:\t", x$fit$AICc, "\n")
+        if(!is.na(x$fit$convergence)){
+            cat("Convergence:\t", if(x$fit$convergence == 0) "successful" else "not converged", "\n")
+        }
+        if(!is.na(x$fit$hessian_ok)){
+            cat("Hessian:\t", if(isTRUE(x$fit$hessian_ok)) "reliable" else "check solution", "\n")
+        }
+    }else{
+        cat("Fit status:\tdefault parameterization only (optimization=\"fixed\")", "\n")
+    }
+    cat("Parameter blocks", "\n")
+    cat("______________________", "\n")
+    cat("theta:\t", if(length(x$blocks$theta)) paste(x$blocks$theta, collapse=", ") else "none", "\n", sep="")
+    cat("alpha:\t", if(length(x$blocks$alpha)) paste(x$blocks$alpha, collapse=", ") else "none", "\n", sep="")
+    cat("sigma:\t", if(length(x$blocks$sigma)) paste(x$blocks$sigma, collapse=", ") else "none", "\n", sep="")
+    cat("beta:\t", if(length(x$blocks$beta)) paste(x$blocks$beta, collapse=", ") else "none", "\n", sep="")
+    cat("\n")
+    cat("Regime summary", "\n")
+    cat("______________________", "\n")
+    print(x$regime.summary, row.names=FALSE)
+    invisible(x)
+}
+
+mvSIMMAP <- function(tree, data, process, process.groups=NULL, error=NULL,
                      param=list(alpha=NULL, sigma=NULL, beta=NULL,
                                 decomp=c("cholesky", "diagonal", "diagonalPositive"),
                                 decompSigma=c("cholesky", "diagonal")),
@@ -412,8 +600,36 @@ mvSIMMAP <- function(tree, data, process, error=NULL,
     tree <- .mvSIMMAP_reorder_tree(tree, order="cladewise")
     regime_names <- colnames(tree$mapped.edge)
     process <- .mvSIMMAP_as_named_process(process, regime_names=regime_names)
+    process_groups <- .mvSIMMAP_as_named_groups(process.groups, regime_names=regime_names, process=process)
+    alpha_regimes <- regime_names[process %in% c("OU", "OUM")]
     ou_regimes <- regime_names[process == "OU"]
+    oum_regimes <- regime_names[process == "OUM"]
     eb_regimes <- regime_names[process == "EB"]
+    group_names <- unique(unname(process_groups[regime_names]))
+    group_process <- setNames(vapply(group_names, function(group){
+        process[[match(group, process_groups)]]
+    }, character(1)), group_names)
+    alpha_groups <- group_names[group_process[group_names] %in% c("OU", "OUM")]
+    ou_groups <- group_names[group_process[group_names] == "OU"]
+    eb_groups <- group_names[group_process[group_names] == "EB"]
+    theta_ids <- character(0)
+    theta_labels <- character(0)
+    if(length(ou_groups)){
+        theta_ids <- c(theta_ids, paste0("group::", ou_groups))
+        theta_labels <- c(theta_labels, paste0("theta.", ou_groups))
+    }
+    if(length(oum_regimes)){
+        theta_ids <- c(theta_ids, paste0("regime::", oum_regimes))
+        theta_labels <- c(theta_labels, paste0("theta.", oum_regimes))
+    }
+    theta_labels <- make.unique(theta_labels, sep=".")
+    theta_by_regime <- setNames(rep(NA_integer_, length(regime_names)), regime_names)
+    if(length(ou_regimes)){
+        theta_by_regime[ou_regimes] <- match(paste0("group::", process_groups[ou_regimes]), theta_ids)
+    }
+    if(length(oum_regimes)){
+        theta_by_regime[oum_regimes] <- match(paste0("regime::", oum_regimes), theta_ids)
+    }
     decomp <- if(is.null(param[["decomp"]])) "cholesky" else param$decomp[1]
     decompSigma <- if(is.null(param[["decompSigma"]])) "cholesky" else param$decompSigma[1]
     sigma_fallback <- startParamSigma(p, decompSigma, tree, data)
@@ -424,40 +640,41 @@ mvSIMMAP <- function(tree, data, process, error=NULL,
     low_default <- log(1e-5)/maxHeight
     up_default <- 0
     beta_low <- if(is.null(param[["low"]])) {
-        setNames(rep(low_default, length(eb_regimes)), eb_regimes)
+        setNames(rep(low_default, length(eb_groups)), eb_groups)
     }else{
         vals <- param$low
         if(is.null(names(vals)) && length(vals) == 1L){
-            setNames(rep(vals, length(eb_regimes)), eb_regimes)
-        }else if(is.null(names(vals)) && length(vals) == length(eb_regimes)){
-            setNames(vals, eb_regimes)
+            setNames(rep(vals, length(eb_groups)), eb_groups)
+        }else if(is.null(names(vals)) && length(vals) == length(eb_groups)){
+            setNames(vals, eb_groups)
         }else{
-            setNames(as.numeric(vals[eb_regimes]), eb_regimes)
+            setNames(as.numeric(vals[eb_groups]), eb_groups)
         }
     }
     beta_up <- if(is.null(param[["up"]])) {
-        setNames(rep(up_default, length(eb_regimes)), eb_regimes)
+        setNames(rep(up_default, length(eb_groups)), eb_groups)
     }else{
         vals <- param$up
         if(is.null(names(vals)) && length(vals) == 1L){
-            setNames(rep(vals, length(eb_regimes)), eb_regimes)
-        }else if(is.null(names(vals)) && length(vals) == length(eb_regimes)){
-            setNames(vals, eb_regimes)
+            setNames(rep(vals, length(eb_groups)), eb_groups)
+        }else if(is.null(names(vals)) && length(vals) == length(eb_groups)){
+            setNames(vals, eb_groups)
         }else{
-            setNames(as.numeric(vals[eb_regimes]), eb_regimes)
+            setNames(as.numeric(vals[eb_groups]), eb_groups)
         }
     }
     if(anyNA(beta_low) || anyNA(beta_up)){
-        stop("Named beta bounds must match the EB regimes in the SIMMAP tree", call.=FALSE)
+        stop("Named beta bounds must match the EB process groups in the SIMMAP model", call.=FALSE)
     }
-    if(length(eb_regimes) && any(beta_low > beta_up)){
+    if(length(eb_groups) && any(beta_low > beta_up)){
         stop("Each EB lower bound must be less than or equal to its upper bound", call.=FALSE)
     }
-    sigma_start <- vector("list", length(regime_names))
-    names(sigma_start) <- regime_names
-    for(regime in regime_names){
-        raw <- .mvSIMMAP_pick_list_value(param[["sigma"]], regime, regime_names)
-        sigma_start[[regime]] <- .mvSIMMAP_sigma_start(
+    sigma_start <- vector("list", length(group_names))
+    names(sigma_start) <- group_names
+    for(group in group_names){
+        regime <- regime_names[match(group, process_groups)]
+        raw <- .mvSIMMAP_pick_grouped_value(param[["sigma"]], regime, regime_names, group=group, group_order=group_names)
+        sigma_start[[group]] <- .mvSIMMAP_sigma_start(
             value=raw,
             p=p,
             decompSigma=decompSigma,
@@ -466,11 +683,12 @@ mvSIMMAP <- function(tree, data, process, error=NULL,
             fallback=sigma_fallback
         )
     }
-    alpha_start <- vector("list", length(ou_regimes))
-    names(alpha_start) <- ou_regimes
-    for(regime in ou_regimes){
-        raw <- .mvSIMMAP_pick_list_value(param[["alpha"]], regime, ou_regimes)
-        alpha_start[[regime]] <- .mvSIMMAP_alpha_start(
+    alpha_start <- vector("list", length(alpha_groups))
+    names(alpha_start) <- alpha_groups
+    for(group in alpha_groups){
+        regime <- regime_names[match(group, process_groups)]
+        raw <- .mvSIMMAP_pick_grouped_value(param[["alpha"]], regime, alpha_regimes, group=group, group_order=alpha_groups)
+        alpha_start[[group]] <- .mvSIMMAP_alpha_start(
             value=raw,
             p=p,
             decomp=decomp,
@@ -478,11 +696,12 @@ mvSIMMAP <- function(tree, data, process, error=NULL,
             fallback=alpha_fallback
         )
     }
-    beta_start <- numeric(length(eb_regimes))
-    names(beta_start) <- eb_regimes
-    for(regime in eb_regimes){
-        raw <- .mvSIMMAP_pick_beta_value(param[["beta"]], regime, eb_regimes)
-        beta_start[[regime]] <- if(is.null(raw)) beta_default else as.numeric(raw)[1]
+    beta_start <- numeric(length(eb_groups))
+    names(beta_start) <- eb_groups
+    for(group in eb_groups){
+        regime <- regime_names[match(group, process_groups)]
+        raw <- .mvSIMMAP_pick_grouped_value(param[["beta"]], regime, eb_regimes, group=group, group_order=eb_groups)
+        beta_start[[group]] <- if(is.null(raw)) beta_default else as.numeric(raw)[1]
     }
     alphafun <- function(x) matrixParam(x, p, decomp)
     sigmafun <- function(x) symPar(x, decomp=decompSigma, p=p)
@@ -490,19 +709,19 @@ mvSIMMAP <- function(tree, data, process, error=NULL,
     nsigma <- length(sigma_fallback)
     start <- numeric(0)
     beta_idx <- integer(0)
-    for(regime in regime_names){
-        type <- process[[regime]]
-        if(type == "OU"){
-            start <- c(start, alpha_start[[regime]])
+    for(group in group_names){
+        type <- group_process[[group]]
+        if(type %in% c("OU", "OUM")){
+            start <- c(start, alpha_start[[group]])
         }
-        start <- c(start, sigma_start[[regime]])
+        start <- c(start, sigma_start[[group]])
         if(type == "EB"){
             beta_idx <- c(beta_idx, length(start) + 1L)
-            start <- c(start, beta_start[[regime]])
+            start <- c(start, beta_start[[group]])
         }
     }
-    mean_names <- if(length(ou_regimes)){
-        c("root", paste0("theta.", ou_regimes))
+    mean_names <- if(length(theta_labels)){
+        c("root", theta_labels)
     }else{
         "root"
     }
@@ -510,9 +729,16 @@ mvSIMMAP <- function(tree, data, process, error=NULL,
     spec <- list(
         tree=tree,
         process=process,
+        process_groups=process_groups,
         regime_names=regime_names,
+        group_names=group_names,
+        group_process=group_process,
+        alpha_groups=alpha_groups,
         ou_regimes=ou_regimes,
-        ou_index=setNames(seq_along(ou_regimes), ou_regimes),
+        ou_groups=ou_groups,
+        oum_regimes=oum_regimes,
+        theta_labels=theta_labels,
+        theta_by_regime=theta_by_regime,
         segments=lapply(seq_len(nrow(tree$edge)), function(i) .mvSIMMAP_edge_segments(tree, i)),
         mrca=mrca(tree, full=FALSE),
         n=n,
@@ -566,9 +792,9 @@ mvSIMMAP <- function(tree, data, process, error=NULL,
         }
     }
     attr(llfun, "model") <- "SIMMAPmixed"
-    attr(llfun, "alpha") <- length(ou_regimes) * nalpha
-    attr(llfun, "sigma") <- length(regime_names) * nsigma
-    attr(llfun, "beta") <- length(eb_regimes)
+    attr(llfun, "alpha") <- length(alpha_groups) * nalpha
+    attr(llfun, "sigma") <- length(group_names) * nsigma
+    attr(llfun, "beta") <- length(eb_groups)
     attr(llfun, "theta") <- sizeD
     class(llfun) <- c("mvmorph.llik")
     theta_zero <- .mvSIMMAP_make_theta_matrix(
@@ -581,11 +807,14 @@ mvSIMMAP <- function(tree, data, process, error=NULL,
         param$nbspecies <- n
         param$ntraits <- p
         param$nregimes <- length(regime_names)
+        param$nprocess.groups <- length(group_names)
         param$method <- method
         param$optimization <- optimization
         param$traits <- colnames(data)
         param$names_regimes <- regime_names
+        param$names_process_groups <- group_names
         param$process <- process
+        param$process.groups <- process_groups
         param$model <- "SIMMAPmixed"
         param$decomp <- decomp
         param$decompSigma <- decompSigma
@@ -599,9 +828,11 @@ mvSIMMAP <- function(tree, data, process, error=NULL,
             sigma=values$sigma,
             beta=values$beta,
             process=process,
+            process.groups=process_groups,
             param=param
         )
-        class(results) <- c("mvmorph")
+        class(results) <- c("mvmorph.mixed", "mvmorph")
+        if(isTRUE(echo)) .mvSIMMAP_print_object(results)
         invisible(results)
         return(results)
     }
@@ -676,46 +907,18 @@ mvSIMMAP <- function(tree, data, process, error=NULL,
         dimnames(x) <- list(trait_names, trait_names)
         x
     })
-    if(isTRUE(echo)){
-        cat("\n")
-        cat("-- Summary results for the experimental SIMMAP mixed model --", "\n")
-        cat("LogLikelihood:\t", LL, "\n")
-        cat("AIC:\t", AIC, "\n")
-        cat("AICc:\t", AICc, "\n")
-        cat(nparam, "parameters", "\n")
-        cat("Process assignment", "\n")
-        cat("______________________", "\n")
-        print(process)
-        cat("\n")
-        cat("Estimated mean parameters", "\n")
-        cat("______________________", "\n")
-        print(theta.mat)
-        if(length(alpha_named)){
-            cat("\n")
-            cat("OU alpha matrices", "\n")
-            cat("______________________", "\n")
-            print(alpha_named)
-        }
-        cat("\n")
-        cat("Regime sigma matrices", "\n")
-        cat("______________________", "\n")
-        print(sigma_named)
-        if(length(fitted_values$beta)){
-            cat("\n")
-            cat("EB beta values", "\n")
-            cat("______________________", "\n")
-            print(fitted_values$beta)
-        }
-    }
     param$nparam <- nparam
     param$nbspecies <- n
     param$ntraits <- p
     param$nregimes <- length(regime_names)
+    param$nprocess.groups <- length(group_names)
     param$method <- method
     param$optimization <- optimization
     param$traits <- trait_names
     param$names_regimes <- regime_names
+    param$names_process_groups <- group_names
     param$process <- process
+    param$process.groups <- process_groups
     param$model <- "SIMMAPmixed"
     param$decomp <- decomp
     param$decompSigma <- decompSigma
@@ -732,42 +935,26 @@ mvSIMMAP <- function(tree, data, process, error=NULL,
         sigma=sigma_named,
         beta=fitted_values$beta,
         process=process,
+        process.groups=process_groups,
         convergence=estim$convergence,
         hess.values=hess.val,
         param=param,
         llik=llfun
     )
-    class(results) <- c("mvmorph", "mvmorph.mixed")
+    class(results) <- c("mvmorph.mixed", "mvmorph")
+    if(isTRUE(echo)) .mvSIMMAP_print_object(results)
     invisible(results)
 }
 
 print.mvmorph.mixed <- function(x, ...){
-    cat("\n")
-    cat("-- Summary results for the experimental SIMMAP mixed model --", "\n")
-    cat("LogLikelihood:\t", x$LogLik, "\n")
-    cat("AIC:\t", x$AIC, "\n")
-    cat("AICc:\t", x$AICc, "\n")
-    cat("Process assignment", "\n")
-    cat("______________________", "\n")
-    print(x$process)
-    cat("\n")
-    cat("Estimated mean parameters", "\n")
-    cat("______________________", "\n")
-    print(x$theta)
-    if(length(x$alpha)){
-        cat("\n")
-        cat("OU alpha matrices", "\n")
-        cat("______________________", "\n")
-        print(x$alpha)
-    }
-    cat("\n")
-    cat("Regime sigma matrices", "\n")
-    cat("______________________", "\n")
-    print(x$sigma)
-    if(length(x$beta)){
-        cat("\n")
-        cat("EB beta values", "\n")
-        cat("______________________", "\n")
-        print(x$beta)
-    }
+    .mvSIMMAP_print_object(x)
+}
+
+summary.mvmorph.mixed <- function(object, ...){
+    out <- .mvSIMMAP_summary_object(object)
+    .mvSIMMAP_print_summary(out)
+}
+
+print.summary.mvmorph.mixed <- function(x, ...){
+    .mvSIMMAP_print_summary(x)
 }
