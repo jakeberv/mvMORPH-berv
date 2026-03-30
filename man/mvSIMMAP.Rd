@@ -58,6 +58,8 @@ Whether a fitted-model summary is printed.
 \details{
 This function implements a dense likelihood-based mixed-regime extension for painted SIMMAP trees. Each mapped branch segment is treated as a local Gaussian transition and the transitions are composed along each lineage. BM, OU, OUM, and EB regimes can therefore coexist on the same painted tree.
 
+At present, this is the only public mixed-process SIMMAP entry point in the fork; the planned \code{mvgls} integration remains a separate design problem.
+
 The current implementation is experimental and is designed around \code{mvMORPH}'s existing dense likelihood machinery. The underlying modeling idea was taken from the branchwise mixed-Gaussian formulation developed in \code{PCMBase}/\code{PCMFit}: branch-local Gaussian transitions are composed along the tree to handle changes in process type and parameters among mapped segments. This implementation is not a code port of \code{PCMBase}/\code{PCMFit}, and it does not yet implement their linear-time pruning algorithm. Consequently, \code{mvSIMMAP} is best suited to moderate tree sizes.
 
 By default, each painted regime gets its own dynamic parameter block. Supplying \code{process.groups} allows multiple painted regimes to share the same dynamic OU, OUM, BM, or EB parameters. The fitted mean parameters always include a root-state vector. For \code{"OU"}, each process group contributes a single optimum vector, so grouped painted regimes are collapsed into one OU regime for the likelihood. For \code{"OUM"}, each painted regime contributes its own optimum vector even when several regimes share the same OU dynamics. BM and EB regimes contribute only covariance/process parameters.
@@ -90,7 +92,7 @@ Mitov V., Bartoszek K., Asimomitis G., Stadler T. 2019. Fast likelihood calculat
 Mitov V., Bartoszek K., Stadler T. PCMBase and PCMFit project documentation. The mixed-Gaussian branchwise formulation in these projects was the main conceptual inspiration for the present \code{mvSIMMAP} implementation.
 }
 \author{
-Julien Clavel; experimental SIMMAP mixed-model extension in this branch.
+Julien Clavel; experimental SIMMAP mixed-model extension in this fork.
 }
 \seealso{
 \code{\link{mvBM}}
@@ -98,6 +100,7 @@ Julien Clavel; experimental SIMMAP mixed-model extension in this branch.
 \code{\link{mvEB}}
 \code{\link{mvSHIFT}}
 \code{\link{mvSIM}}
+\code{\link{mvgls}}
 }
 \examples{
 \donttest{

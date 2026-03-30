@@ -8,7 +8,7 @@ This spec is the main onboarding document for future threads. It describes, in o
 
 - Status: active
 - Last updated: 2026-03-30
-- Applies to branch: `codex/mvsimmap-mixed-model`
+- Applies to branch: `master`
 
 ## Executive Summary
 
@@ -28,7 +28,7 @@ The current integrated recommendation is:
 - for OUM work, use the merged covariate-capable `mvgls(..., model="OUM")` path
 - for experimental BMM correlation-aware work, use `bmm.structure="corrpower"`
 - for the nested correlation-only variant, use `bmm.structure="corrpower", bmm.scale=FALSE`
-- for mixed-process painted-tree work, use the standalone `mvSIMMAP()` fitter on this branch
+- for mixed-process painted-tree work, use the standalone `mvSIMMAP()` fitter in this fork
 
 ## Baseline
 
@@ -36,7 +36,7 @@ Relative to current `origin/master` / `upstream/master`:
 
 - baseline commit: `65228fc` `Update NAMESPACE`
 
-The current branch includes all work described below.
+The current repo includes all work described below.
 
 ## Workstream 1: OUM Covariates And Validation
 
@@ -178,7 +178,7 @@ Key milestones:
 
 ### What Changed
 
-This branch added an experimental standalone `mvSIMMAP()` fitter for painted `simmap` trees. The fitter allows each painted regime to be assigned one of `BM`, `OU`, `OUM`, or `EB`, then composes branch-local Gaussian transitions across mapped segments inside `mvMORPH`'s dense likelihood machinery.
+This fork added an experimental standalone `mvSIMMAP()` fitter for painted `simmap` trees. The fitter allows each painted regime to be assigned one of `BM`, `OU`, `OUM`, or `EB`, then composes branch-local Gaussian transitions across mapped segments inside `mvMORPH`'s dense likelihood machinery.
 
 The implementation was conceptually inspired by PCMBase/PCMFit's branchwise mixed-Gaussian formulation, but it is not a code port and it does not reuse their pruning engine.
 
@@ -321,12 +321,12 @@ If a new thread is about the experimental BMM work, it should assume:
 
 If a new thread is about OUM:
 
-- the merged `master` already includes the OUM covariate support work
+- the merged repo already includes the OUM covariate support work
 - the OUM simulation and summary-report infrastructure is already present under `tests/experimental_oum_*.R` and `tests/reports/`
 
 If a new thread is about mixed-process painted SIMMAP models:
 
-- the current branch already includes a standalone `mvSIMMAP()` fitter
+- the current repo already includes a standalone `mvSIMMAP()` fitter
 - read `man/mvSIMMAP.Rd` for the public surface
 - use `specs/050-mvgls-simmap-mixed-design.md` only for the planned `mvgls` integration path
 - do not assume that mixed-process SIMMAP support already exists inside `mvgls`

@@ -2,18 +2,18 @@
 
 ## Purpose
 
-This spec gives a new thread the minimum local context needed to work safely in this forked `mvMORPH` repo after the OUM and experimental BMM workstreams were merged back together.
+This spec gives a new thread the minimum local context needed to work safely in this forked `mvMORPH` repo after the OUM, experimental corrpower BMM, and standalone `mvSIMMAP()` workstreams were integrated on `master`.
 
 ## Status
 
 - Status: active
-- Last updated: 2026-03-26
+- Last updated: 2026-03-30
 - Applies to branch: `master`
 
 ## Repository Identity
 
 - Local checkout: `<local checkout path>`
-- Remote fork: `origin = https://github.com/jakeberv/mvMORPH.git`
+- Remote fork: `origin = https://github.com/jakeberv/mvMORPH-berv.git`
 - Upstream source: `upstream = https://github.com/JClavel/mvMORPH.git`
 
 At the time this spec was written:
@@ -32,7 +32,8 @@ The local `master` branch contains merged work on top of that baseline, includin
 
 - OUM covariate support and OUM simulation/validation harnesses
 - experimental BMM correlation-aware work ending in the `corrpower` family
-- simulation summary reports for both workstreams
+- a standalone mixed-process `mvSIMMAP()` fitter for painted trees
+- simulation summary reports for the OUM and corrpower workstreams
 
 See `specs/010-fork-delta.md` for the detailed change inventory.
 
@@ -90,6 +91,19 @@ Important paths:
 - `tests/experimental_corrpower_*.R`
 - `tests/experimental_bmmcorr_*.R`
 
+### Experimental `mvSIMMAP()`
+
+Current public mixed-process SIMMAP path:
+
+- `mvSIMMAP(tree, data, process, process.groups = ..., ...)`
+
+Important paths:
+
+- `R/mvSIMMAP.r`
+- `man/mvSIMMAP.Rd`
+- `tests/testthat/test-mvSIMMAP.R`
+- `specs/050-mvgls-simmap-mixed-design.md`
+
 ## Working Conventions
 
 - Use `master` as the integrated local branch unless there is a reason to branch off again.
@@ -97,6 +111,7 @@ Important paths:
 - Prefer the dedicated experimental harnesses in `tests/` for simulation or stress-test work.
 - Treat the files in `reports/` and `tests/reports/` as generated summaries that capture prior campaign outcomes.
 - Treat the BMM correlation-aware code as experimental even though it is merged locally.
+- Treat `mvSIMMAP()` as the current mixed-process SIMMAP entry point; `mvgls` integration is still only a draft design.
 
 ## First Files To Read For New Work
 
@@ -111,4 +126,11 @@ If the new thread is about the new experimental BMM model:
 1. `R/mvgls_bmm_corrpower.r`
 2. `man/corrpower_diagnostics.Rd`
 3. `reports/corrpower_simulation_report.md`
+4. `specs/010-fork-delta.md`
+
+If the new thread is about mixed-process SIMMAP models:
+
+1. `man/mvSIMMAP.Rd`
+2. `tests/testthat/test-mvSIMMAP.R`
+3. `specs/050-mvgls-simmap-mixed-design.md`
 4. `specs/010-fork-delta.md`

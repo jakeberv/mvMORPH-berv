@@ -7,7 +7,7 @@ This runbook is the operational handoff for the OUM simulation and validation wo
 ## Status
 
 - Status: active
-- Last updated: 2026-03-26
+- Last updated: 2026-03-30
 - Applies to branch: `master`
 
 ## Scope
@@ -52,9 +52,7 @@ Key validation file:
 
 - `tests/experimental_oum_covariate_grid.R`
   - early broad covariate-oriented OUM sweep kept mainly for baseline smoke coverage
-  - a later unmerged rewrite expanded this script with richer predictor families (`cont_indep`, `cont_confounded`, `disc_binary`, `disc3_sparse_confounded`), explicit near-null effect-size sweeps, and generic `delta50` / `delta80` sharpness summaries
-  - those ideas were mostly superseded by the focused scripts above, so future work should extend the focused suites rather than revive the broad-grid rewrite wholesale
-  - if a future thread wants a single broad covariate sweep again, the only idea worth selectively reusing is the generic near-null sharpness summary layer
+  - future work should generally extend the focused scripts above rather than revive the abandoned broad-grid rewrite wholesale; the one idea most worth reusing is the generic near-null sharpness summary layer
 
 ### Summary Report
 

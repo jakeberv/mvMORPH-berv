@@ -7,7 +7,7 @@ This runbook is the operational handoff for the experimental BMM correlation-awa
 ## Status
 
 - Status: active
-- Last updated: 2026-03-26
+- Last updated: 2026-03-30
 - Applies to branch: `master`
 
 ## Scope
@@ -117,8 +117,8 @@ Rscript tests/experimental_bmmcorr_family_comparison.R
 ### Documentation Check
 
 ```bash
-Rscript -e 'library(devtools); load_all("<local checkout path>", quiet=TRUE)'
-Rscript -e 'tools::parse_Rd("<local checkout path>/man/mvgls.Rd"); tools::parse_Rd("<local checkout path>/man/corrpower_diagnostics.Rd"); tools::parse_Rd("<local checkout path>/man/EIC.Rd")'
+Rscript -e 'library(devtools); load_all(".", quiet=TRUE)'
+Rscript -e 'tools::parse_Rd("man/mvgls.Rd"); tools::parse_Rd("man/corrpower_diagnostics.Rd"); tools::parse_Rd("man/EIC.Rd")'
 ```
 
 ## Targeted Comparison Campaign

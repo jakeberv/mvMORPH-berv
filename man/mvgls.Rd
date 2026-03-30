@@ -46,7 +46,7 @@ Use REML (default) or ML for estimating the parameters.
 \item{...}{
 Options to be passed through. For instance the type of penalization: 
 \code{penalty="RidgeArch"} (default), \code{penalty="RidgeAlt"}, or \code{penalty="LASSO"}. The target matrices used by "RidgeArch" and "RidgeAlt" penalizations: \code{target="unitVariance"}, \code{target="Variance"} or \code{target="null"}... etc. (see details)
-For \code{model="BMM"}, the experimental option \code{bmm.structure="corrpower"} selects the regime-specific correlation-power model family. These modes are currently restricted to \code{method="LL"}, \code{REML=FALSE}, and \code{error=NULL}, and use the legacy proportional-BMM reference convention by default. With the default \code{bmm.scale=TRUE}, the reference regime is fixed at \code{scale=1} and \code{corr_power=1}; non-reference regimes are fit with deterministic multi-start when \code{start} is omitted. With \code{bmm.scale=FALSE}, the reference regime is fixed only at \code{corr_power=1} and only non-reference \code{corr_power} parameters are estimated. The optional \code{bmm.reference} setting chooses which SIMMAP regime is used as the reference; it can be supplied as either a regime name or a 1-based regime index, and defaults to the first mapped regime. The earlier experimental \code{"corrshrink"} and \code{"corrstrength"} selectors have been retired on this branch in favor of \code{"corrpower"}.
+For \code{model="BMM"}, the experimental option \code{bmm.structure="corrpower"} selects the regime-specific correlation-power model family. These modes are currently restricted to \code{method="LL"}, \code{REML=FALSE}, and \code{error=NULL}, and use the legacy proportional-BMM reference convention by default. With the default \code{bmm.scale=TRUE}, the reference regime is fixed at \code{scale=1} and \code{corr_power=1}; non-reference regimes are fit with deterministic multi-start when \code{start} is omitted. With \code{bmm.scale=FALSE}, the reference regime is fixed only at \code{corr_power=1} and only non-reference \code{corr_power} parameters are estimated. The optional \code{bmm.reference} setting chooses which SIMMAP regime is used as the reference; it can be supplied as either a regime name or a 1-based regime index, and defaults to the first mapped regime. The earlier experimental \code{"corrshrink"} and \code{"corrstrength"} selectors have been retired in this fork in favor of \code{"corrpower"}.
 }
 
 }
@@ -55,7 +55,7 @@ For \code{model="BMM"}, the experimental option \code{bmm.structure="corrpower"}
 
 For the experimental BMM correlation-power modes, \code{GIC}, \code{EIC}, \code{simulate()}, \code{predict()}, \code{ancestral()}, normalized residuals, \code{confint()}, and the corresponding diagnostics helpers are available. These branches return a shared baseline covariance matrix together with per-regime covariance matrices and correlation-power parameters, and \code{"corrpower"} also estimates regime-specific scales. A reference regime is fixed for identifiability and can be selected with \code{bmm.reference}; the default is the first mapped regime. To keep the output interpretable, corr-power fits also include a derived \code{regime.summary} table with per-regime average variance/rate and correlation summaries. The current experimental modes still do not support \code{vcov(type="coef")}.
 
-The tree is assumed to be fully dichotomic and in "postorder", otherwise the functions \code{multi2di} and \code{reorder.phylo} are used internally. Note that for the "BMM" and "OUM" models, a tree of class "simmap" must be provided to describe the mapped regimes on the tree (see also \code{mvBM} and \code{mvOU}). In the \code{"OUM"} case, the regime-specific optimum columns are included automatically and any additional predictors supplied in the model formula are kept as covariates in the GLS design. For unpenalized \code{model="OUM"} fits with \code{method="LL"}, this branch warns when the number of traits approaches the effective covariance sample size and stops once \emph{p} is greater than or equal to that effective sample size; in such cases prefer \code{"LOOCV"} or \code{"EmpBayes"}.
+The tree is assumed to be fully dichotomic and in "postorder", otherwise the functions \code{multi2di} and \code{reorder.phylo} are used internally. Note that for the "BMM" and "OUM" models, a tree of class "simmap" must be provided to describe the mapped regimes on the tree (see also \code{mvBM} and \code{mvOU}). In the \code{"OUM"} case, the regime-specific optimum columns are included automatically and any additional predictors supplied in the model formula are kept as covariates in the GLS design. For unpenalized \code{model="OUM"} fits with \code{method="LL"}, the current LL path warns when the number of traits approaches the effective covariance sample size and stops once \emph{p} is greater than or equal to that effective sample size; in such cases prefer \code{"LOOCV"} or \code{"EmpBayes"}. For mixed BM/OU/OUM/EB painted-tree models, use \code{\link{mvSIMMAP}}; there is not yet a corresponding \code{mvgls} model selector.
 
 To fit an ordinary multivariate linear model (possibly regularized), one can uses the \code{mvols} function instead.
 
@@ -92,7 +92,7 @@ An object of class '\code{mvgls}'. It contains a list including the following co
 \item{fitted        }{the fitted values}
 \item{variables     }{the variables used for model fit}
 \item{sigma         }{the estimated covariance (Pinv) and precision (P) matrix, as well as the sample estimate (S); for the experimental BMM correlation-aware modes, this also includes the per-regime covariance matrices}
-\item{bmm.structure  }{the BMM sub-structure used for the fit. The default is the proportional model; the experimental correlation-aware mode is selected with \code{bmm.structure="corrpower"}. Set \code{bmm.scale=FALSE} to use the nested correlation-only version. The earlier experimental \code{"corrshrink"} and \code{"corrstrength"} selectors have been retired on this branch.}
+\item{bmm.structure  }{the BMM sub-structure used for the fit. The default is the proportional model; the experimental correlation-aware mode is selected with \code{bmm.structure="corrpower"}. Set \code{bmm.scale=FALSE} to use the nested correlation-only version. The earlier experimental \code{"corrshrink"} and \code{"corrstrength"} selectors have been retired in this fork.}
 \item{reference_regime}{for the experimental correlation-aware BMM modes, the SIMMAP regime fixed at \code{scale=1} or \code{corr_power=1} for identifiability}
 \item{model         }{the evolutionary model. But more generally, the model used to specify the structure within the residuals}
 \item{logLik	    	}{either the (negative) log-likelihood when \code{method="LL"} or the cross-validated penalized likelihood}
@@ -157,6 +157,7 @@ Julien Clavel
 \code{\link{vcov.mvgls}}
 \code{\link{predict.mvgls}}
 \code{\link{corrpower_diagnostics}}
+\code{\link{mvSIMMAP}}
 %% ~~objects to See Also as \code{\link{help}}, ~~~
 }
 
@@ -208,6 +209,19 @@ data=list(Y=Y, X=X)
 
 fit_ml <- mvgls(Y~X, data=data, tree, model="lambda")
 summary(fit_ml)
+
+\dontrun{
+# OUM regression keeps formula covariates alongside regime-specific optima
+simmap <- suppressMessages(phytools::make.simmap(
+  tree,
+  setNames(sample(c("A", "B"), n, replace=TRUE), tree$tip.label),
+  model="ER",
+  nsim=1
+))
+fit_oum <- mvgls(Y[,1:2]~X, data=list(Y=Y[,1:2], X=X),
+                 tree=simmap, model="OUM", method="LL", REML=FALSE)
+summary(fit_oum)
+}
 
 # --------------------------- #
 # A High-dimensional dataset  #

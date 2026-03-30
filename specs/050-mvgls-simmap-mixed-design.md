@@ -8,7 +8,9 @@ This spec captures the current design for bringing mixed BM/OU/OUM/EB regime sup
 
 - Status: draft
 - Last updated: 2026-03-30
-- Applies to branch: `codex/mvsimmap-mixed-model`
+- Applies to branch: `master`
+
+This is a forward-looking design note. The currently implemented public mixed-process SIMMAP surface is the standalone `mvSIMMAP()` fitter, not `mvgls(..., model="SIMMAPmixed")`.
 
 ## Scope
 
