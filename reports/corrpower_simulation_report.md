@@ -293,7 +293,7 @@ The best next step is not a new model family yet. It is to consolidate and commu
 
 This report was assembled from the following simulation outputs and summaries:
 
-- `<local checkout path>/archon-pulls/260320-052747-2ef2/analysis/summary.txt`
-- `Combined CSV for targeted corrpower comparison campaign, run 1`
-- `Combined CSV for targeted corrpower comparison campaign, stabilized run 2`
-- `Combined CSV for corrpower fossil-recovery campaign, run 3`
+- Archon analysis summary for the targeted corrpower comparison campaign
+- Combined CSV for targeted corrpower comparison campaign, run 1
+- Combined CSV for targeted corrpower comparison campaign, stabilized run 2
+- Combined CSV for corrpower fossil-recovery campaign, run 3

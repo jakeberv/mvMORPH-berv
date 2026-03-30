@@ -1800,7 +1800,6 @@ confint.mvgls <- function(object, parm=NULL, level=0.95, method=c("profile","boo
     rownames(out) <- summary_df$label
     out
 }
-
 # ------------------------------------------------------------------------- #
 # logLik.mvgls                                                              #
 # options: object, ...                                                      #

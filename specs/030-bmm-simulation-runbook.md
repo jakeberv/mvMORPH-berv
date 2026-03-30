@@ -292,7 +292,7 @@ Avoid large-worker campaigns that rely on many concurrent `pkgload::load_all()` 
 
 ### User-Level R Library
 
-When running as `tguser` remotely, prefer the user-level library already used in prior campaigns:
+When running remotely, prefer a user-level R library rather than the system library. For example:
 
 - `$HOME/R/x86_64-pc-linux-gnu-library/4.5`
 
