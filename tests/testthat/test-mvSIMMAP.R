@@ -18,6 +18,53 @@ make_two_regime_simmap <- function(seed=1, n=8){
     }
 }
 
+make_bm_ou_benchmark_simmap <- function(seed=20260330, n=50, min_derived_tips=15, target_derived_tips=28){
+    set.seed(seed)
+    tree <- phytools::pbtree(n=n, scale=1)
+    internal_nodes <- seq_len(tree$Nnode) + ape::Ntip(tree)
+    root_node <- ape::Ntip(tree) + 1L
+    candidates <- setdiff(internal_nodes, root_node)
+    sizes <- sapply(candidates, function(node) ape::Ntip(ape::extract.clade(tree, node)))
+    eligible <- candidates[sizes >= min_derived_tips & sizes < n]
+    if(!length(eligible)){
+        stop("No eligible derived subtree found for the requested benchmark setup", call.=FALSE)
+    }
+    eligible_sizes <- sizes[sizes >= min_derived_tips & sizes < n]
+    node <- eligible[which.min(abs(eligible_sizes - target_derived_tips))]
+    simmap <- phytools::paintSubTree(tree, node=node, state="B", anc.state="A", stem=TRUE)
+    list(
+        tree=simmap,
+        shift.node=node,
+        derived.tips=sum(phytools::getStates(simmap, "tips") == "B")
+    )
+}
+
+make_bm_ou_true_param <- function(ntraits=3){
+    if(ntraits < 1L || ntraits > 3L){
+        stop("This benchmark helper currently supports between 1 and 3 traits", call.=FALSE)
+    }
+    trait_names <- paste0("y", seq_len(ntraits))
+    theta_B_base <- c(1.5, -1.0, 0.75)
+    sigma_base <- matrix(
+        c(0.040, 0.012, 0.008,
+          0.012, 0.030, 0.009,
+          0.008, 0.009, 0.025),
+        3, 3, byrow=TRUE
+    )
+    alpha_base <- diag(c(3.0, 2.5, 2.0), 3)
+    sigma <- sigma_base[seq_len(ntraits), seq_len(ntraits), drop=FALSE]
+    alpha <- alpha_base[seq_len(ntraits), seq_len(ntraits), drop=FALSE]
+    dimnames(sigma) <- list(trait_names, trait_names)
+    dimnames(alpha) <- list(trait_names, trait_names)
+    theta <- rbind(root=rep(0, ntraits), "theta.B"=theta_B_base[seq_len(ntraits)])
+    colnames(theta) <- trait_names
+    list(
+        theta=theta,
+        sigma=list(A=sigma, B=sigma),
+        alpha=list(B=alpha)
+    )
+}
+
 test_that("mvSIMMAP all-BM special case matches mvBM BMM likelihoods", {
     set.seed(1)
     tree <- ape::rtree(8)
@@ -343,6 +390,100 @@ test_that("mvSIMMAP summary method returns a compact structural summary", {
     expect_match(out, "Parameter blocks")
     expect_match(out, "Regime summary")
     expect_match(out, "theta:\\ttheta\\.A, theta\\.B")
+})
+
+test_that("mvSIMMAP multivariate helpers keep fitted output interpretable", {
+    tree <- make_two_regime_simmap(seed=181, n=8)
+    X <- matrix(rnorm(ape::Ntip(tree) * 2), ncol=2)
+    rownames(X) <- tree$tip.label
+
+    fit <- mvSIMMAP(
+        tree, X,
+        process=c(A="BM", B="OU"),
+        method="inverse",
+        optimization="fixed",
+        param=list(decomp="diagonalPositive", decompSigma="cholesky"),
+        echo=FALSE
+    )
+
+    expect_identical(colnames(fit$theta), c("trait1", "trait2"))
+    expect_identical(rownames(fit$sigma$A), c("trait1", "trait2"))
+    expect_identical(colnames(fit$sigma$B), c("trait1", "trait2"))
+    expect_identical(rownames(fit$alpha$B), c("trait1", "trait2"))
+
+    expect_equal(coef(fit), fit$theta)
+
+    pars <- parameters(fit)
+    expect_s3_class(pars, "data.frame", exact=FALSE)
+    expect_true(all(c("block", "group", "row", "col", "estimate", "parameter") %in% names(pars)))
+    expect_true(any(pars$parameter == "theta[root,trait1]"))
+    expect_true(any(pars$parameter == "sigma[A,trait1,trait2]"))
+    expect_true(any(pars$parameter == "alpha[B,trait2,trait2]"))
+    expect_equal(coef(fit, type="all"), pars)
+
+    sum_fit <- summary(fit)
+    out <- paste(capture.output(print(sum_fit)), collapse="\n")
+    expect_match(out, "Multivariate overview")
+    expect_match(out, "Sigma variances")
+    expect_match(out, "Sigma correlations")
+    expect_match(out, "OU pull summary")
+
+    compact_out <- paste(capture.output(print(fit, compact=TRUE)), collapse="\n")
+    expect_match(compact_out, "mvSIMMAP summary")
+    expect_match(compact_out, "Multivariate overview")
+})
+
+test_that("mvSIMMAP supports a multivariate BM to OU simulation and recovery smoke path", {
+    benchmark <- make_bm_ou_benchmark_simmap(seed=123, n=20, min_derived_tips=6, target_derived_tips=8)
+    process <- c(A="BM", B="OU")
+    true_param <- make_bm_ou_true_param(ntraits=2)
+
+    scaffold <- mvSIMMAP(
+        benchmark$tree, data=NULL,
+        process=process,
+        method="rpf",
+        optimization="fixed",
+        param=list(
+            ntraits=2,
+            names_traits=c("y1", "y2"),
+            decomp="diagonalPositive",
+            decompSigma="cholesky"
+        ),
+        echo=FALSE
+    )
+
+    X <- simulate(scaffold, nsim=1, seed=321, param=true_param)
+    fit <- mvSIMMAP(
+        benchmark$tree, X,
+        process=process,
+        method="rpf",
+        optimization="L-BFGS-B",
+        param=list(decomp="diagonalPositive", decompSigma="cholesky"),
+        control=list(
+            maxit=120,
+            retry.unreliable=TRUE,
+            retry.max=1,
+            retry.jitter=0.05,
+            retry.seed=1
+        ),
+        diagnostic=FALSE,
+        echo=FALSE
+    )
+
+    expect_gte(benchmark$derived.tips, 6)
+    expect_identical(fit$convergence, 0L)
+    expect_identical(fit$diagnostics$hessian$status, "reliable")
+    expect_identical(colnames(fit$theta), c("y1", "y2"))
+    expect_equal(dim(fit$sigma$A), c(2L, 2L))
+    expect_equal(dim(fit$alpha$B), c(2L, 2L))
+
+    pars <- parameters(fit)
+    expect_true(any(pars$parameter == "theta[theta.B,y1]"))
+    expect_true(any(pars$parameter == "sigma[B,y1,y2]"))
+
+    out <- paste(capture.output(print(fit, compact=TRUE)), collapse="\n")
+    expect_match(out, "Multivariate overview")
+    expect_match(out, "OU pull summary")
 })
 
 test_that("mvSIMMAP Hessian diagnostics distinguish reliable, flat, and saddle solutions", {

@@ -645,6 +645,190 @@
     theta_mat
 }
 
+.mvSIMMAP_normalize_trait_names <- function(trait_names, p){
+    default_names <- paste0("trait", seq_len(p))
+    if(is.null(trait_names)){
+        return(default_names)
+    }
+    trait_names <- as.character(trait_names)
+    if(length(trait_names) != p){
+        stop("Trait names must have length ", p, call.=FALSE)
+    }
+    trait_names[is.na(trait_names)] <- ""
+    missing_names <- !nzchar(trait_names)
+    trait_names[missing_names] <- default_names[missing_names]
+    make.unique(trait_names, sep=".")
+}
+
+.mvSIMMAP_empty_parameter_table <- function(){
+    data.frame(
+        block=character(0),
+        group=character(0),
+        row=character(0),
+        col=character(0),
+        estimate=numeric(0),
+        parameter=character(0),
+        stringsAsFactors=FALSE
+    )
+}
+
+.mvSIMMAP_theta_parameter_table <- function(theta){
+    if(is.null(theta)) return(.mvSIMMAP_empty_parameter_table())
+    theta <- as.matrix(theta)
+    row_names <- rownames(theta) %||% paste0("theta", seq_len(nrow(theta)))
+    col_names <- colnames(theta) %||% .mvSIMMAP_normalize_trait_names(NULL, ncol(theta))
+    idx <- which(matrix(TRUE, nrow(theta), ncol(theta)), arr.ind=TRUE)
+    data.frame(
+        block="theta",
+        group=NA_character_,
+        row=row_names[idx[, 1]],
+        col=col_names[idx[, 2]],
+        estimate=as.numeric(theta[idx]),
+        parameter=paste0("theta[", row_names[idx[, 1]], ",", col_names[idx[, 2]], "]"),
+        stringsAsFactors=FALSE
+    )
+}
+
+.mvSIMMAP_matrix_parameter_table <- function(values, block){
+    if(!length(values)) return(.mvSIMMAP_empty_parameter_table())
+    out <- lapply(names(values), function(group){
+        mat <- as.matrix(values[[group]])
+        row_names <- rownames(mat) %||% .mvSIMMAP_normalize_trait_names(NULL, nrow(mat))
+        col_names <- colnames(mat) %||% .mvSIMMAP_normalize_trait_names(NULL, ncol(mat))
+        idx <- which(matrix(TRUE, nrow(mat), ncol(mat)), arr.ind=TRUE)
+        data.frame(
+            block=block,
+            group=group,
+            row=row_names[idx[, 1]],
+            col=col_names[idx[, 2]],
+            estimate=as.numeric(mat[idx]),
+            parameter=paste0(block, "[", group, ",", row_names[idx[, 1]], ",", col_names[idx[, 2]], "]"),
+            stringsAsFactors=FALSE
+        )
+    })
+    do.call(rbind, out)
+}
+
+.mvSIMMAP_numeric_parameter_table <- function(values, block){
+    if(!length(values)) return(.mvSIMMAP_empty_parameter_table())
+    group_names <- names(values) %||% rep("", length(values))
+    data.frame(
+        block=block,
+        group=group_names,
+        row=NA_character_,
+        col=NA_character_,
+        estimate=as.numeric(values),
+        parameter=paste0(block, "[", group_names, "]"),
+        stringsAsFactors=FALSE
+    )
+}
+
+.mvSIMMAP_parameter_table <- function(object){
+    blocks <- list(
+        .mvSIMMAP_theta_parameter_table(object$theta),
+        .mvSIMMAP_matrix_parameter_table(object$alpha, "alpha"),
+        .mvSIMMAP_matrix_parameter_table(object$sigma, "sigma"),
+        .mvSIMMAP_numeric_parameter_table(object$beta, "beta")
+    )
+    blocks <- Filter(function(x) nrow(x) > 0L, blocks)
+    if(!length(blocks)) return(.mvSIMMAP_empty_parameter_table())
+    out <- do.call(rbind, blocks)
+    rownames(out) <- NULL
+    out
+}
+
+.mvSIMMAP_sigma_variance_summary <- function(sigma){
+    if(!length(sigma)){
+        return(data.frame(
+            process.group=character(0),
+            trait=character(0),
+            variance=numeric(0),
+            stringsAsFactors=FALSE
+        ))
+    }
+    out <- lapply(names(sigma), function(group){
+        mat <- as.matrix(sigma[[group]])
+        trait_names <- rownames(mat) %||% .mvSIMMAP_normalize_trait_names(NULL, nrow(mat))
+        data.frame(
+            process.group=group,
+            trait=trait_names,
+            variance=diag(mat),
+            stringsAsFactors=FALSE
+        )
+    })
+    do.call(rbind, out)
+}
+
+.mvSIMMAP_sigma_correlation_summary <- function(sigma){
+    if(!length(sigma)){
+        return(data.frame(
+            process.group=character(0),
+            trait1=character(0),
+            trait2=character(0),
+            correlation=numeric(0),
+            stringsAsFactors=FALSE
+        ))
+    }
+    out <- lapply(names(sigma), function(group){
+        mat <- as.matrix(sigma[[group]])
+        if(nrow(mat) < 2L) return(NULL)
+        cor_mat <- cov2cor(mat)
+        row_names <- rownames(cor_mat) %||% .mvSIMMAP_normalize_trait_names(NULL, nrow(cor_mat))
+        col_names <- colnames(cor_mat) %||% .mvSIMMAP_normalize_trait_names(NULL, ncol(cor_mat))
+        idx <- which(upper.tri(cor_mat), arr.ind=TRUE)
+        data.frame(
+            process.group=group,
+            trait1=row_names[idx[, 1]],
+            trait2=col_names[idx[, 2]],
+            correlation=as.numeric(cor_mat[idx]),
+            stringsAsFactors=FALSE
+        )
+    })
+    out <- Filter(Negate(is.null), out)
+    if(!length(out)){
+        return(data.frame(
+            process.group=character(0),
+            trait1=character(0),
+            trait2=character(0),
+            correlation=numeric(0),
+            stringsAsFactors=FALSE
+        ))
+    }
+    do.call(rbind, out)
+}
+
+.mvSIMMAP_alpha_pull_summary <- function(alpha){
+    if(!length(alpha)){
+        return(data.frame(
+            process.group=character(0),
+            trait=character(0),
+            alpha=numeric(0),
+            half.life=numeric(0),
+            coupled=logical(0),
+            stringsAsFactors=FALSE
+        ))
+    }
+    out <- lapply(names(alpha), function(group){
+        mat <- as.matrix(alpha[[group]])
+        trait_names <- rownames(mat) %||% .mvSIMMAP_normalize_trait_names(NULL, nrow(mat))
+        diag_alpha <- diag(mat)
+        half_life <- rep(NA_real_, length(diag_alpha))
+        positive <- diag_alpha > 0
+        half_life[positive] <- log(2) / diag_alpha[positive]
+        half_life[diag_alpha == 0] <- Inf
+        coupled <- any(abs(mat[row(mat) != col(mat)]) > sqrt(.Machine$double.eps))
+        data.frame(
+            process.group=group,
+            trait=trait_names,
+            alpha=diag_alpha,
+            half.life=half_life,
+            coupled=rep(coupled, length(diag_alpha)),
+            stringsAsFactors=FALSE
+        )
+    })
+    do.call(rbind, out)
+}
+
 .mvSIMMAP_regime_summary <- function(process, process.groups=NULL){
     regime_names <- names(process)
     if(is.null(regime_names)) regime_names <- as.character(seq_along(process))
@@ -784,6 +968,11 @@
         sigma=sigma_groups %||% character(0),
         beta=beta_groups %||% character(0)
     )
+    multivariate <- list(
+        sigma.variances=.mvSIMMAP_sigma_variance_summary(object$sigma),
+        sigma.correlations=.mvSIMMAP_sigma_correlation_summary(object$sigma),
+        alpha.pull=.mvSIMMAP_alpha_pull_summary(object$alpha)
+    )
     out <- list(
         model=object$param$model %||% "SIMMAPmixed",
         method=object$param$method %||% NA_character_,
@@ -791,7 +980,8 @@
         dimensions=dims,
         fit=fit,
         blocks=blocks,
-        regime.summary=regime_summary
+        regime.summary=regime_summary,
+        multivariate=multivariate
     )
     class(out) <- "summary.mvmorph.mixed"
     out
@@ -844,6 +1034,27 @@
     cat("Regime summary", "\n")
     cat("______________________", "\n")
     print(x$regime.summary, row.names=FALSE)
+    if(isTRUE(x$dimensions$p > 1L)){
+        if(nrow(x$multivariate$sigma.variances) || nrow(x$multivariate$sigma.correlations) || nrow(x$multivariate$alpha.pull)){
+            cat("\n")
+            cat("Multivariate overview", "\n")
+            cat("______________________", "\n")
+            if(nrow(x$multivariate$sigma.variances)){
+                cat("Sigma variances", "\n")
+                print(x$multivariate$sigma.variances, row.names=FALSE)
+            }
+            if(nrow(x$multivariate$sigma.correlations)){
+                cat("\n")
+                cat("Sigma correlations", "\n")
+                print(x$multivariate$sigma.correlations, row.names=FALSE)
+            }
+            if(nrow(x$multivariate$alpha.pull)){
+                cat("\n")
+                cat("OU pull summary", "\n")
+                print(x$multivariate$alpha.pull, row.names=FALSE)
+            }
+        }
+    }
     invisible(x)
 }
 
@@ -912,12 +1123,10 @@ mvSIMMAP <- function(tree, data, process, process.groups=NULL, error=NULL,
         }
         p <- .mvSIMMAP_infer_ntraits(param, nmean=1L + length(theta_labels))
         trait_names <- param[["names_traits"]]
-        if(!is.null(trait_names)){
-            trait_names <- as.character(trait_names)
-            if(length(trait_names) != p){
-                stop("param$names_traits must have length param$ntraits for fixed mvSIMMAP scaffolds without data", call.=FALSE)
-            }
+        if(!is.null(trait_names) && length(trait_names) != p){
+            stop("param$names_traits must have length param$ntraits for fixed mvSIMMAP scaffolds without data", call.=FALSE)
         }
+        trait_names <- .mvSIMMAP_normalize_trait_names(trait_names, p)
         data <- matrix(0, nrow=Ntip(tree), ncol=p, dimnames=list(tree$tip.label, trait_names))
     }else{
         data <- as.matrix(data)
@@ -932,6 +1141,7 @@ mvSIMMAP <- function(tree, data, process, process.groups=NULL, error=NULL,
         }
         p <- ncol(data)
         if(is.null(p)) p <- 1L
+        colnames(data) <- .mvSIMMAP_normalize_trait_names(colnames(data), p)
     }
     n <- nrow(data)
     if(n != Ntip(tree)){
@@ -1121,10 +1331,18 @@ mvSIMMAP <- function(tree, data, process, process.groups=NULL, error=NULL,
     theta_zero <- .mvSIMMAP_make_theta_matrix(
         theta=rep(0, sizeD),
         mean_names=mean_names,
-        trait_names=if(is.null(colnames(data))) rep("", p) else colnames(data)
+        trait_names=colnames(data)
     )
     if(optimization == "fixed"){
         values <- .mvSIMMAP_unpack(start, spec)
+        sigma_named <- lapply(values$sigma, function(x){
+            dimnames(x) <- list(colnames(data), colnames(data))
+            x
+        })
+        alpha_named <- lapply(values$alpha, function(x){
+            dimnames(x) <- list(colnames(data), colnames(data))
+            x
+        })
         param$nbspecies <- n
         param$ntraits <- p
         param$nregimes <- length(regime_names)
@@ -1146,8 +1364,8 @@ mvSIMMAP <- function(tree, data, process, process.groups=NULL, error=NULL,
         results <- list(
             llik=llfun,
             theta=theta_zero,
-            alpha=values$alpha,
-            sigma=values$sigma,
+            alpha=alpha_named,
+            sigma=sigma_named,
             beta=values$beta,
             process=process,
             process.groups=process_groups,
@@ -1281,8 +1499,7 @@ mvSIMMAP <- function(tree, data, process, process.groups=NULL, error=NULL,
     AIC <- -2 * LL + 2 * nparam
     AICc <- AIC + ((2 * nparam * (nparam + 1))/(nobs - nparam - 1))
     fitted_values <- .mvSIMMAP_unpack(estim$par, spec)
-    trait_names <- colnames(data)
-    if(is.null(trait_names)) trait_names <- rep("", p)
+    trait_names <- .mvSIMMAP_normalize_trait_names(colnames(data), p)
     theta.mat <- .mvSIMMAP_make_theta_matrix(
         theta=res.theta,
         mean_names=mean_names,
@@ -1342,16 +1559,37 @@ mvSIMMAP <- function(tree, data, process, process.groups=NULL, error=NULL,
 }
 
 print.mvmorph.mixed <- function(x, ...){
+    dots <- list(...)
+    compact <- isTRUE(dots[["compact"]])
+    if(compact){
+        print(summary(x))
+        return(invisible(x))
+    }
     .mvSIMMAP_print_object(x)
 }
 
 summary.mvmorph.mixed <- function(object, ...){
-    out <- .mvSIMMAP_summary_object(object)
-    .mvSIMMAP_print_summary(out)
+    .mvSIMMAP_summary_object(object)
 }
 
 print.summary.mvmorph.mixed <- function(x, ...){
     .mvSIMMAP_print_summary(x)
+}
+
+coef.mvmorph.mixed <- function(object, type=c("theta", "all"), ...){
+    type <- match.arg(type)
+    if(type == "theta"){
+        return(object$theta)
+    }
+    parameters(object)
+}
+
+parameters <- function(object, ...){
+    UseMethod("parameters")
+}
+
+parameters.mvmorph.mixed <- function(object, ...){
+    .mvSIMMAP_parameter_table(object)
 }
 
 .mvSIMMAP_extract_spec <- function(object, tree=NULL){
@@ -1371,8 +1609,7 @@ print.summary.mvmorph.mixed <- function(x, ...){
 .mvSIMMAP_trait_names <- function(object, spec){
     trait_names <- object$param$traits
     if(is.null(trait_names)) trait_names <- colnames(object$theta)
-    if(is.null(trait_names)) trait_names <- rep("", spec$p)
-    trait_names
+    .mvSIMMAP_normalize_trait_names(trait_names, spec$p)
 }
 
 .mvSIMMAP_theta_matrix <- function(object, spec){
@@ -1598,7 +1835,7 @@ simulate.mvmorph.mixed <- function(object, nsim=1, seed=NULL, tree=NULL,
     theta_vec <- as.numeric(t(resolved$theta))
     mean_vec <- as.numeric(built$D %*% theta_vec)
     trait_names <- colnames(resolved$theta)
-    if(is.null(trait_names)) trait_names <- rep("", spec$p)
+    trait_names <- .mvSIMMAP_normalize_trait_names(trait_names, spec$p)
     tip_labels <- spec$tree$tip.label
     error_vec <- .mvSIMMAP_error_vector(error, n=spec$n, p=spec$p, tip_labels=tip_labels, trait_names=trait_names)
     V <- built$V

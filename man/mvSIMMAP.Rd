@@ -66,11 +66,15 @@ By default, each painted regime gets its own dynamic parameter block. Supplying 
 
 Printed model objects show the estimated parameter matrices in detail. Calling \code{summary()} on a fitted \code{mvSIMMAP} object gives a more compact structural view listing the painted regimes, process groups, theta ownership, and the names of the estimated parameter blocks. EB beta values printed at or extremely near zero are annotated as the BM boundary for readability.
 
+For multivariate fits, \code{summary()} also adds a compact overview of process-group variances, cross-trait correlations, and traitwise OU pull summaries. \code{print(fit, compact=TRUE)} is a shorthand for printing that summary view directly.
+
 The post-fit Hessian check is slightly more informative than the older binary \code{mvMORPH} diagnostic used in some other fitters. Tiny negative eigenvalues inside \code{hessian.tol} are treated as numerical noise, nearly zero eigenvalues are reported as a flat or boundary solution, and clearly negative eigenvalues are reported as a possible saddle point. When \code{retry.unreliable = TRUE}, the function can automatically try a small number of jittered restarts and keep the best retained solution.
 
 Fixed or optimized \code{mvSIMMAP} objects can also be used as scaffolds for \code{simulate()}. The simulator reuses the fitted tree, \code{process}, and \code{process.groups} structure from the object and, when needed, accepts a \code{param=list(...)} override with replacement values for \code{theta}, \code{sigma}, \code{alpha}, and \code{beta}. This mixed-model simulation path is currently tied to the scaffold's original tree rather than supporting a new \code{tree=} override.
 
 For simulation-first workflows, \code{mvSIMMAP(tree, data=NULL, optimization="fixed", ...)} can be used as a lightweight scaffold constructor. Internally this creates a zero-valued placeholder dataset only to establish dimensions and default parameter blocks; the resulting object is intended mainly for \code{simulate()} rather than for likelihood-based inference.
+
+\code{coef(fit)} returns the estimated mean-parameter matrix, whereas \code{parameters(fit)} returns a long-form table of all fitted parameter elements with block, group, row, and column labels that are easier to use in simulation studies and post-processing scripts.
 }
 \value{
 \item{LogLik }{The log-likelihood of the fitted model, stored as a standard \code{"logLik"} object with \code{df} and \code{nobs} attributes for compatibility with generic comparison tools such as \code{BIC()}.}
@@ -105,6 +109,7 @@ Julien Clavel; experimental SIMMAP mixed-model extension in this fork.
 \code{\link{mvSHIFT}}
 \code{\link{mvSIM}}
 \code{\link{mvgls}}
+\code{\link{parameters}}
 }
 \examples{
 \donttest{

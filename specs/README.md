@@ -18,6 +18,7 @@ For a new thread, read these first:
 3. `specs/020-validation-and-open-questions.md`
 4. `specs/030-bmm-simulation-runbook.md` or `specs/040-oum-simulation-runbook.md`, depending on the workstream
 5. `specs/050-mvgls-simmap-mixed-design.md` when working on mixed-process SIMMAP support in `mvgls`
+6. `specs/060-mvSIMMAP-simulation-validation.md` when working on standalone mixed-process SIMMAP simulation or recovery checks
 
 ## Conventions
 
@@ -41,6 +42,8 @@ For a new thread, read these first:
   - how to resume local or remote simulation work for the OUM extensions and model-selection studies
 - `specs/050-mvgls-simmap-mixed-design.md`
   - design constraints, current standalone `mvSIMMAP()` behavior, and open questions for mixed BM/OU/OUM/EB SIMMAP support in `mvgls`
+- `specs/060-mvSIMMAP-simulation-validation.md`
+  - current exact-tree local benchmark results for standalone `mvSIMMAP()` simulation and parameter recovery, including 1D/2D/3D runs and `rpf` versus `inverse` timing
 - `specs/TEMPLATE.md`
   - starting point for future specs
 

@@ -67,6 +67,12 @@ That regression file currently covers:
 
 There is not yet a larger simulation campaign or summary report for `mvSIMMAP()` comparable to the OUM and corrpower workstreams.
 
+There is now, however, a durable local exact-tree benchmark summary for the standalone mixed fitter in:
+
+- `specs/060-mvSIMMAP-simulation-validation.md`
+
+That spec records the current 1D, 2D, and 3D matched-tree recovery checks, including the main takeaway that `theta` and background `BM` covariance recover more cleanly than derived-regime `OU` pull strengths, plus the local `rpf` versus `inverse` timing comparison for the dense implementation.
+
 What changed recently:
 
 - mixed-process SIMMAP simulation is now available through `simulate()` on `mvSIMMAP` objects
@@ -149,10 +155,11 @@ If working on the corrpower fitter or diagnostics, also run:
 If working on `mvSIMMAP()` or mixed-process SIMMAP docs/logic, also run:
 
 6. `Rscript -e 'testthat::test_local(".", filter = "mvSIMMAP", reporter = "summary")'`
+7. `MVSIMMAP_BENCH_REPS=1 Rscript tests/experimental_mvsimmap_recovery_benchmark.R`
 
 If working on OUM simulation logic, also run:
 
-7. a tiny env-restricted smoke run of `tests/experimental_oum_theta_recovery_grid.R`
+8. a tiny env-restricted smoke run of `tests/experimental_oum_theta_recovery_grid.R`
 
 ## Notes For New Threads
 
